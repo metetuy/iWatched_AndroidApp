@@ -29,9 +29,9 @@ iWatched is a sleek, intuitive Flutter application that helps movie enthusiasts 
 
 ## 📱 Screenshots
 <p align="center">
-  <img src="assets/screenshots/login_screen.png" alt="Login Screen" width="200" />
-  <img src="images/screenshot2.png" alt="Movie Discovery" width="200" />
-  <img src="images/screenshot3.png" alt="Profile Screen" width="200" />
+  <img src="assets/screenshots/login_screen.png" alt="Login Screen" width="250" />
+  <img src="assets/screenshots/swipe_page.png" alt="Movie Discovery" width="200" />
+  <img src="assets/screenshots/SearchMovie.png" alt="Profile Screen" width="200" />
 </p>
 
 ## 🚀 Getting Started
@@ -64,8 +64,5 @@ To use this app, you'll need:
 - A TMDB API key
 - A Firebase project with Authentication and Firestore enabled
 
-
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 
