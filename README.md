@@ -64,16 +64,8 @@ To use this app, you'll need:
 - A TMDB API key
 - A Firebase project with Authentication and Firestore enabled
 
-## 🤝 Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-- **The Movie Database (TMDB)** for providing the movie data API
-- **Flutter** for the amazing UI toolkit
-- **Firebase** for backend services
-- **All contributors** who helped make this project a reality
 
-<p align="center">Made with ❤️ by [Your Name]</p>
