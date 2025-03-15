@@ -10,10 +10,6 @@ iWatched is a sleek, intuitive Flutter application that helps movie enthusiasts 
 
 ## ✨ Features
 
-### 🎯 Personalized Recommendations
-- **Genre Selection**: Customize your experience by selecting your preferred movie genres.
-- **Smart Algorithm**: Get tailored movie recommendations based on your preferences and viewing history.
-
 ### 🔍 Powerful Discovery
 - **Intuitive Swiping**: Discover new movies with a Tinder-like swiping interface.
 - **Rich Details**: View comprehensive information including ratings, synopsis, and genre tags.
@@ -24,14 +20,9 @@ iWatched is a sleek, intuitive Flutter application that helps movie enthusiasts 
 - **Watch Later**: Save interesting movies for future viewing.
 - **Skip List**: Filter out movies you're not interested in seeing.
 
-### 👤 User Experience
-- **Secure Authentication**: Firebase authentication with email/password and "Keep Me Logged In" functionality.
-- **Profile Management**: Easily view and manage your movie collections.
-- **Responsive Design**: Beautiful experience on any device size.
-
 ## 🛠️ Technologies Used
 - **Frontend**: Flutter & Dart
-- **Backend**: Firebase (Authentication, Firestore, Storage)
+- **Backend**: Firebase (Authentication, Firestore)
 - **API**: TMDB (The Movie Database) for comprehensive movie data
 - **State Management**: GetX for efficient state management and dependency injection
 - **Authentication**: Firebase Auth with persistent login capabilities
