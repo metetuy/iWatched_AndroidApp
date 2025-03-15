@@ -29,7 +29,7 @@ iWatched is a sleek, intuitive Flutter application that helps movie enthusiasts 
 
 ## 📱 Screenshots
 <p align="center">
-  <img src="assets/login_screen.png" alt="Login Screen" width="200" />
+  <img src="assets/screenshots/login_screen.png" alt="Login Screen" width="200" />
   <img src="images/screenshot2.png" alt="Movie Discovery" width="200" />
   <img src="images/screenshot3.png" alt="Profile Screen" width="200" />
 </p>
