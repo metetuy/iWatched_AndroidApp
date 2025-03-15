@@ -26,16 +26,16 @@ class _SplashScreenAnimationState extends State<SplashScreenAnimation>
   @override
   void initState() {
     super.initState();
-    
+
     // Verify Firebase auth status
     final user = FirebaseAuth.instance.currentUser;
-    
-    // If user is null but loggedIn flag is true, we need to reset it 
+
+    // If user is null but loggedIn flag is true, we need to reset it
     // unless keepMeLoggedIn is true
     if (user == null && widget.loggedIn) {
       final prefs = Get.find<SharedPreferences>();
       final keepMeLoggedIn = prefs.getBool('keepMeLoggedIn') ?? false;
-      
+
       if (!keepMeLoggedIn) {
         prefs.setBool('loggedIn', false);
         _nextScreen = const LoginScreen();
@@ -44,13 +44,13 @@ class _SplashScreenAnimationState extends State<SplashScreenAnimation>
       // Normal flow
       _nextScreen = widget.loggedIn ? const MainScreen() : const LoginScreen();
     }
-    
+
     // Set up animation controller
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 750),
     );
-    
+
     // Start timer for navigation
     startTimer();
   }
@@ -64,11 +64,13 @@ class _SplashScreenAnimationState extends State<SplashScreenAnimation>
   startTimer() {
     // Wait for 3 seconds before starting the animation
     Timer(const Duration(seconds: 3), () {
-      _animationController.forward().then((_) {
-        Navigator.of(context).pushReplacement(
-          FadeTransitionRoute(page: _nextScreen!),
-        );
-      });
+      if (mounted) {
+        _animationController.forward().then((_) {
+          Navigator.of(context).pushReplacement(
+            FadeTransitionRoute(page: _nextScreen!),
+          );
+        });
+      }
     });
   }
 
