@@ -6,6 +6,28 @@ import 'package:iwatched/homepage/main_screen.dart';
 class GenrePreferenceScreen extends StatefulWidget {
   const GenrePreferenceScreen({super.key});
 
+  static final List<String> genres = [
+    "Action",
+    "Adventure", 
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Family",
+    "Fantasy",
+    "History",
+    "Horror",
+    "Music",
+    "Mystery",
+    "Romance",
+    "Science Fiction",
+    "TV Movie",
+    "Thriller",
+    "War",
+    "Western",
+  ];
+
   @override
   State<GenrePreferenceScreen> createState() => _GenrePreferenceScreenState();
 }
@@ -15,36 +37,7 @@ class _GenrePreferenceScreenState extends State<GenrePreferenceScreen> {
   AuthenticationController authenticationController =
       AuthenticationController();
 
-  final List<String> genres = [
-    "Action",
-    "Adventure",
-    "Comedy",
-    "Crime",
-    "Drama",
-    "Fantasy",
-    "History",
-    "Horror",
-    "Mystery",
-    "Romance",
-    "Thriller",
-    "Western",
-    "Animation",
-    "Family",
-    "Music",
-    "War",
-    "Documentary",
-    "Sci-fi",
-    "Biography",
-    "Sport",
-    "Talk Show",
-    "Reality-TV",
-    "News",
-    "Game Show",
-    "Short",
-    "Film-Noir",
-    "Musical"
-  ];
-
+  final genres = GenrePreferenceScreen.genres;
   List<String> selectedGenres = [];
 
   @override
@@ -158,8 +151,8 @@ class _GenrePreferenceScreenState extends State<GenrePreferenceScreen> {
                     //go to the main screen
                     if (selectedGenres.isNotEmpty) {
                       try {
-                        await authenticationController.updateUserGenres(
-                            selectedGenres);
+                        await authenticationController
+                            .updateUserGenres(selectedGenres);
                         Get.offAll(() => MainScreen());
                       } catch (e) {
                         Get.snackbar("Error", "Failed to navigate: $e");
