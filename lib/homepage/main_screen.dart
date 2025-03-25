@@ -10,6 +10,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:get/get.dart';
 import 'package:iwatched/utilities/movie_dialog_util.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:iwatched/authenticationScreen/genre_preference_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -31,11 +33,15 @@ class _MainScreenState extends State<MainScreen> {
 
   final PageController _pageController = PageController(initialPage: 1);
   final TMDBService _tmdbService = TMDBService();
-  final List<Movie> _movies = [];
+  final List<Movie> _allMovies = [];
+  final List<Movie> _genreFilteredMovies = [];
+  final List<String> _includeFilterGenres = [];
+  final List<String> _excludeFilterGenres = [];
   user_profile.User? _user;
   int _currentMovieIndex = 0;
   int _previousMovieIndex = 0;
   bool _isFetching = false;
+  bool _usePreferedGenres = false;
 
   // Add these variables to track swipe history
   final List<Map<String, dynamic>> _swipeHistory = [];
@@ -48,6 +54,11 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
 
     Get.put(_pageController);
+
+    // Load user preferences
+    SharedPreferences.getInstance().then((prefs) {
+      _usePreferedGenres = prefs.getBool('usePreferedGenres') ?? false;
+    });
 
     _initializeData();
   }
@@ -85,7 +96,7 @@ class _MainScreenState extends State<MainScreen> {
     if (direction == CardSwiperDirection.left) {
       //Not interested => add to the not interested list
       debugPrint(
-          'Did not watch ${_movies[_previousMovieIndex].title} , index: $_previousMovieIndex');
+          'Did not watch ${_allMovies[_previousMovieIndex].title} , index: $_previousMovieIndex');
       _updateUserMovies(_previousMovieIndex, direction);
     } else if (direction == CardSwiperDirection.right) {
       //did watch => add to the watched list
@@ -98,7 +109,7 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     // Fetch more movies if we are running out
-    if (_currentMovieIndex >= _movies.length - 8) {
+    if (_currentMovieIndex >= _allMovies.length - 8) {
       // Consider fetching more movies here
       _fetchMovies();
     }
@@ -128,7 +139,7 @@ class _MainScreenState extends State<MainScreen> {
       // Handle Firebase updates in a separate method
       _handleUndoFirebaseUpdate(lastIndex, lastDirection);
 
-      debugPrint('Undid action for movie: ${_movies[lastIndex].title}');
+      debugPrint('Undid action for movie: ${_allMovies[lastIndex].title}');
       return true;
     } catch (e) {
       debugPrint('Error during undo: $e');
@@ -167,7 +178,7 @@ class _MainScreenState extends State<MainScreen> {
         if (lastDirection == CardSwiperDirection.left) {
           final List<String> currentIds = _user!.notInterestedMovies;
           final updatedIds =
-              currentIds.where((id) => id != _movies[lastIndex].id).toList();
+              currentIds.where((id) => id != _allMovies[lastIndex].id).toList();
           await FirebaseFirestore.instance
               .collection('users')
               .doc(FirebaseAuth.instance.currentUser!.uid)
@@ -183,7 +194,7 @@ class _MainScreenState extends State<MainScreen> {
         }
 
         final updatedList = currentList
-            .where((movie) => movie.title != _movies[lastIndex].title)
+            .where((movie) => movie.title != _allMovies[lastIndex].title)
             .map((movie) => movie.toJson())
             .toList();
 
@@ -241,7 +252,7 @@ class _MainScreenState extends State<MainScreen> {
         }
         List<Map<String, dynamic>> updatedMovies =
             _user!.watchedMovies.map((movie) => movie.toJson()).toList();
-        updatedMovies.add(_movies[movieIndex].toJson());
+        updatedMovies.add(_allMovies[movieIndex].toJson());
         // Update Firestore
         await FirebaseFirestore.instance
             .collection('users')
@@ -258,7 +269,7 @@ class _MainScreenState extends State<MainScreen> {
             _user!.watchLaterMovies.map((movie) => movie.toJson()).toList();
 
         // Add new movie in JSON format
-        updatedWatchLaterMovies.add(_movies[movieIndex].toJson());
+        updatedWatchLaterMovies.add(_allMovies[movieIndex].toJson());
 
         await FirebaseFirestore.instance
             .collection('users')
@@ -273,7 +284,7 @@ class _MainScreenState extends State<MainScreen> {
         List<String> updatedNotInterestedMovies =
             List<String>.from(_user!.notInterestedMovies);
 
-        updatedNotInterestedMovies.add(_movies[movieIndex].id);
+        updatedNotInterestedMovies.add(_allMovies[movieIndex].id);
         // Update Firestore
         await FirebaseFirestore.instance
             .collection('users')
@@ -291,10 +302,85 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // Update the _fetchMovies method
+  //Fetch movies filtered by genre
+  Future<void> _filteredFetchMovies(
+      List<String> includeFilter, List<String> excludeFilter) async {
+    // Prevent multiple fetches
+    if (_isFetching || _allMovies.length >= _cardsCount) return;
+
+    try {
+      // Set flag first, then update UI
+      _isFetching = true;
+
+      // Update UI in a separate call
+      if (mounted) {
+        setState(() {});
+      }
+      final movies = await _tmdbService.getPopularMovies();
+
+      if (_user != null) {
+        final filteredMovies = movies.where((movie) {
+          if (movie.posterPath.isEmpty) {
+            return false;
+          }
+
+          return !_user!.watchedMovies
+                  .any((watchedMovie) => watchedMovie.id == movie.id) &&
+              !_user!.watchLaterMovies
+                  .any((watchLaterMovie) => watchLaterMovie.id == movie.id) &&
+              !_user!.notInterestedMovies.contains(movie.id) &&
+              (includeFilter.isEmpty ||
+                  movie.genres.any((genre) => includeFilter.contains(genre))) &&
+              (excludeFilter.isEmpty ||
+                  !movie.genres.any((genre) => excludeFilter.contains(genre)));
+        }).toList();
+
+        setState(() {
+          if (filteredMovies.isNotEmpty) {
+            filteredMovies.shuffle();
+            _genreFilteredMovies.addAll(filteredMovies);
+            debugPrint(
+                'Added ${filteredMovies.length} new movies. Total: ${_genreFilteredMovies.length}');
+          } else {
+            // If no new movies after filtering, increment page and try again
+            _tmdbService.incrementPage();
+            // Schedule next fetch
+            Future.microtask(
+                () => _filteredFetchMovies(includeFilter, excludeFilter));
+          }
+        });
+      } else {
+        if (mounted) {
+          setState(() {
+            final validMovies =
+                movies.where((movie) => movie.posterPath.isNotEmpty).toList();
+            _genreFilteredMovies.addAll(validMovies);
+            debugPrint(
+                'Added ${validMovies.length} new movies. Total: ${_genreFilteredMovies.length}');
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching movies: $e');
+      if (_genreFilteredMovies.isEmpty && !_isFetching) {
+        Get.snackbar(
+          'Error',
+          'Failed to fetch movies. Please check your internet connection.',
+          duration: const Duration(seconds: 3),
+        );
+      }
+    } finally {
+      _isFetching = false;
+
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
   Future<void> _fetchMovies() async {
     // Prevent multiple fetches
-    if (_isFetching || _movies.length >= _cardsCount) return;
+    if (_isFetching || _allMovies.length >= _cardsCount) return;
 
     try {
       // Set flag first, then update UI
@@ -322,9 +408,9 @@ class _MainScreenState extends State<MainScreen> {
         setState(() {
           if (filteredMovies.isNotEmpty) {
             filteredMovies.shuffle();
-            _movies.addAll(filteredMovies);
+            _allMovies.addAll(filteredMovies);
             debugPrint(
-                'Added ${filteredMovies.length} new movies. Total: ${_movies.length}');
+                'Added ${filteredMovies.length} new movies. Total: ${_allMovies.length}');
           } else {
             // If no new movies after filtering, increment page and try again
             _tmdbService.incrementPage();
@@ -337,15 +423,15 @@ class _MainScreenState extends State<MainScreen> {
           setState(() {
             final validMovies =
                 movies.where((movie) => movie.posterPath.isNotEmpty).toList();
-            _movies.addAll(validMovies);
+            _allMovies.addAll(validMovies);
             debugPrint(
-                'Added ${validMovies.length} new movies. Total: ${_movies.length}');
+                'Added ${validMovies.length} new movies. Total: ${_allMovies.length}');
           });
         }
       }
     } catch (e) {
       debugPrint('Error fetching movies: $e');
-      if (_movies.isEmpty && !_isFetching) {
+      if (_allMovies.isEmpty && !_isFetching) {
         Get.snackbar(
           'Error',
           'Failed to fetch movies. Please check your internet connection.',
@@ -535,8 +621,181 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  final WidgetStateProperty<Color?> overlayColor =
+      WidgetStateProperty<Color?>.fromMap(
+    <WidgetState, Color>{
+      WidgetState.selected:
+          const Color.fromARGB(255, 255, 7, 7).withOpacity(0.54),
+      WidgetState.disabled: Colors.grey.shade400,
+    },
+  );
+
+  final WidgetStateProperty<Color?> thumbColor =
+      WidgetStateProperty<Color?>.fromMap(
+    <WidgetStatesConstraint, Color>{
+      WidgetState.selected: const Color.fromARGB(255, 255, 255, 255),
+      WidgetState.any: Colors.grey.shade400,
+    },
+  );
+
+  final WidgetStateProperty<Icon> thumbIcon = WidgetStateProperty<Icon>.fromMap(
+    <WidgetStatesConstraint, Icon>{
+      WidgetState.selected: Icon(Icons.check, color: Colors.black),
+      WidgetState.any: Icon(Icons.close),
+    },
+  );
+
+  final WidgetStateProperty<Color?> trackColor =
+      WidgetStateProperty<Color?>.fromMap(
+    <WidgetStatesConstraint, Color>{
+      WidgetState.selected: const Color.fromARGB(255, 255, 7, 7)
+    },
+  );
+
+  List<String> genres = GenrePreferenceScreen.genres;
+
+  Future<void> _genreSelectionDialogBuilder(
+      BuildContext context, bool isInclude, List<String> selectedGenres) {
+    // Create a local copy of the selected genres for use within the dialog
+    List<String> localSelectedGenres = List<String>.from(selectedGenres);
+
+    return showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(
+              "Genre Selection",
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min, // Important to prevent overflow
+                children: [
+                  Divider(
+                    color: Colors.grey,
+                  ),
+                  Text(
+                    isInclude
+                        ? "Select must have genres"
+                        : "Select genres to exclude",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 10),
+                  SizedBox(
+                    height: MediaQuery.of(context).size.height * 0.4,
+                    width: MediaQuery.of(context).size.width * 0.8,
+                    child: GridView.builder(
+                      shrinkWrap: true, // Important to prevent overflow
+
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 5,
+                        mainAxisSpacing: 6,
+                        childAspectRatio: 2,
+                      ),
+                      itemCount: genres.length,
+                      itemBuilder: (context, index) {
+                        String genre =
+                            index < genres.length ? genres[index] : "Adult";
+                        bool isSelected = localSelectedGenres.contains(genre);
+
+                        return GestureDetector(
+                          onTap: () {
+                            // Update local state with setDialogState
+                            setDialogState(() {
+                              if (isSelected) {
+                                localSelectedGenres.remove(genre);
+                              } else {
+                                localSelectedGenres.add(genre);
+                              }
+                            });
+                          },
+                          child: Stack(
+                            children: [
+                              Container(
+                                alignment: Alignment.center,
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color.fromARGB(255, 160, 2, 2)
+                                      : const Color.fromARGB(
+                                          255, 102, 102, 102),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  genre,
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : const Color.fromARGB(
+                                            255, 255, 255, 255),
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              if (isSelected)
+                                Positioned(
+                                  right: 4,
+                                  top: 4,
+                                  child: Icon(Icons.check,
+                                      color: const Color.fromARGB(
+                                          255, 255, 255, 255),
+                                      size: 16),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop(); // Cancel
+                },
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  // Only update the parent state when Apply is pressed
+                  setState(() {
+                    // Clear the original list and add all items from the local list
+                    selectedGenres.clear();
+                    selectedGenres.addAll(localSelectedGenres);
+                  });
+                  Navigator.of(context).pop(); // Close dialog
+                },
+                child: Text(
+                  'Apply',
+                  style:
+                      TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
   Widget _swipePage() {
-    if (_movies.isEmpty) {
+    if (_allMovies.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(
           color: Colors.red,
@@ -547,10 +806,11 @@ class _MainScreenState extends State<MainScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          // Info button
-          Align(
-            alignment: Alignment.topRight,
-            child: IconButton(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              //Info Button
+              IconButton(
                 onPressed: () {
                   showDialog(
                       context: context,
@@ -584,7 +844,236 @@ class _MainScreenState extends State<MainScreen> {
                       });
                 },
                 icon: const Icon(Icons.info,
-                    color: Color.fromARGB(255, 226, 226, 226))),
+                    color: Color.fromARGB(255, 226, 226, 226)),
+              ),
+              //Filter Button
+              IconButton(
+                onPressed: () {
+                  bool localPreferedGenres = _usePreferedGenres;
+                  showDialog(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return StatefulBuilder(
+                          builder: (context, setFilterDialogState) {
+                            return AlertDialog(
+                              title: const Text(
+                                'Filter Genre',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              content: SingleChildScrollView(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Divider(
+                                      color: Colors.grey,
+                                    ),
+
+                                    //Select a specific genre to include
+                                    SizedBox(
+                                      child: Text(
+                                        'Must Have Genre',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: MediaQuery.of(context)
+                                                  .size
+                                                  .width *
+                                              0.6,
+                                          constraints: BoxConstraints(
+                                            minHeight:
+                                                40, // Specific height when empty
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color.fromARGB(
+                                                255, 41, 41, 41),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color: const Color.fromARGB(
+                                                  255, 197, 197, 197),
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: _includeFilterGenres.isEmpty
+                                              ? const Center(
+                                                  child: Text(
+                                                    'No genre selected',
+                                                    style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 12),
+                                                  ),
+                                                )
+                                              : Wrap(
+                                                  children: _buildGenreButtons(
+                                                      _includeFilterGenres),
+                                                ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () async {
+                                            await _genreSelectionDialogBuilder(
+                                                context,
+                                                true,
+                                                _includeFilterGenres);
+
+                                            setFilterDialogState(() {});
+                                          },
+                                          icon: Icon(
+                                            Icons.settings_rounded,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    SizedBox(
+                                      child: Text(
+                                        'Exclude Genre',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: MediaQuery.of(context)
+                                                  .size
+                                                  .width *
+                                              0.6,
+                                          constraints: BoxConstraints(
+                                            minHeight:
+                                                40, // Specific height when empty
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color.fromARGB(
+                                                255, 41, 41, 41),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color: const Color.fromARGB(
+                                                  255, 197, 197, 197),
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: _excludeFilterGenres.isEmpty
+                                              ? const Center(
+                                                  child: Text(
+                                                    'No genre selected',
+                                                    style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 12),
+                                                  ),
+                                                )
+                                              : Wrap(
+                                                  children: _buildGenreButtons(
+                                                      _excludeFilterGenres),
+                                                ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () async {
+                                            await _genreSelectionDialogBuilder(
+                                                context,
+                                                false,
+                                                _excludeFilterGenres);
+
+                                            setFilterDialogState(() {});
+                                          },
+                                          icon: Icon(
+                                            Icons.settings_rounded,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    //Select a specific genre to never show
+                                    //Check button for implementing prefered genres
+                                    Row(
+                                      children: [
+                                        Switch(
+                                          overlayColor: overlayColor,
+                                          trackColor: trackColor,
+                                          thumbColor: thumbColor,
+                                          thumbIcon: thumbIcon,
+                                          value: localPreferedGenres,
+                                          onChanged: (bool value) {
+                                            setFilterDialogState(() {
+                                              localPreferedGenres = value;
+                                            });
+                                          },
+                                        ),
+                                        Text(
+                                          'Activate Preferred Genres Filter',
+                                          style: TextStyle(
+                                            color: const Color.fromARGB(
+                                                255, 255, 255, 255),
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  ],
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.only(
+                                  top: 10, left: 15, right: 15, bottom: 0),
+                              actions: <Widget>[
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() async {
+                                      //Save to SharedPreferences
+                                      await SharedPreferences.getInstance()
+                                          .then((prefs) {
+                                        prefs.setBool('usePreferedGenres',
+                                            localPreferedGenres);
+                                      });
+                                      _usePreferedGenres = localPreferedGenres;
+                                      Navigator.of(context).pop();
+                                    });
+                                  },
+                                  child: const Text(
+                                    'Apply',
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                )
+                              ],
+                            );
+                          },
+                        );
+                      });
+                },
+                icon: const Icon(
+                  Icons.filter_list_alt,
+                  color: Color.fromARGB(255, 226, 226, 226),
+                ),
+              ),
+            ],
           ),
           Expanded(
             flex: 7,
@@ -605,13 +1094,13 @@ class _MainScreenState extends State<MainScreen> {
               cardBuilder:
                   (context, index, percentThresholdX, percentThresholdY) {
                 // Start fetching earlier
-                if (index >= _movies.length - 15 && !_isFetching) {
+                if (index >= _allMovies.length - 15 && !_isFetching) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     _fetchMovies();
                   });
                 }
 
-                if (index >= _movies.length) {
+                if (index >= _allMovies.length) {
                   return const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -627,7 +1116,7 @@ class _MainScreenState extends State<MainScreen> {
                   );
                 }
 
-                final movie = _movies[index];
+                final movie = _allMovies[index];
                 return GestureDetector(
                   onTap: () {
                     MovieDialogUtil.showMovieDetailsDialog(
