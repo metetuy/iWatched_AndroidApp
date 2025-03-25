@@ -35,8 +35,8 @@ class _MainScreenState extends State<MainScreen> {
   final TMDBService _tmdbService = TMDBService();
   final List<Movie> _allMovies = [];
   final List<Movie> _genreFilteredMovies = [];
-  final List<String> _includeFilterGenres = [];
-  final List<String> _excludeFilterGenres = [];
+  List<String> _includeFilterGenres = [];
+  List<String> _excludeFilterGenres = [];
   user_profile.User? _user;
   int _currentMovieIndex = 0;
   int _previousMovieIndex = 0;
@@ -58,6 +58,12 @@ class _MainScreenState extends State<MainScreen> {
     // Load user preferences
     SharedPreferences.getInstance().then((prefs) {
       _usePreferedGenres = prefs.getBool('usePreferedGenres') ?? false;
+    });
+
+    // Load genre filters
+    SharedPreferences.getInstance().then((prefs) {
+      _includeFilterGenres = prefs.getStringList('includeFilterGenres') ?? [];
+      _excludeFilterGenres = prefs.getStringList('excludeFilterGenres') ?? [];
     });
 
     _initializeData();
@@ -704,17 +710,17 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                       itemCount: genres.length,
                       itemBuilder: (context, index) {
-                        String genre =
-                            index < genres.length ? genres[index] : "Adult";
+                        String genre = genres[index];
+
                         bool isSelected = localSelectedGenres.contains(genre);
 
                         return GestureDetector(
                           onTap: () {
-                            // Update local state with setDialogState
                             setDialogState(() {
                               if (isSelected) {
                                 localSelectedGenres.remove(genre);
-                              } else {
+                              } else if (localSelectedGenres.isEmpty &&
+                                  !isSelected) {
                                 localSelectedGenres.add(genre);
                               }
                             });
@@ -772,8 +778,30 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () {
-                  // Only update the parent state when Apply is pressed
+                onPressed: () async {
+                  // Find any genres that are in both lists
+                  List<String> otherList =
+                      isInclude ? _excludeFilterGenres : _includeFilterGenres;
+                  List<String> commonGenres = localSelectedGenres
+                      .where((genre) => otherList.contains(genre))
+                      .toList();
+
+                  if (commonGenres.isNotEmpty) {
+                    Get.snackbar(
+                        'Error', 'Cannot have the same genre in both lists');
+                    return;
+                  }
+
+                  // Update the appropriate list
+                  final prefs = await SharedPreferences.getInstance();
+                  if (isInclude) {
+                    await prefs.setStringList(
+                        'includeFilterGenres', localSelectedGenres);
+                  } else {
+                    await prefs.setStringList(
+                        'excludeFilterGenres', localSelectedGenres);
+                  }
+
                   setState(() {
                     // Clear the original list and add all items from the local list
                     selectedGenres.clear();
@@ -885,6 +913,8 @@ class _MainScreenState extends State<MainScreen> {
                                       ),
                                     ),
                                     Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Container(
                                           width: MediaQuery.of(context)
@@ -915,9 +945,14 @@ class _MainScreenState extends State<MainScreen> {
                                                         fontSize: 12),
                                                   ),
                                                 )
-                                              : Wrap(
-                                                  children: _buildGenreButtons(
-                                                      _includeFilterGenres),
+                                              : Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 5, left: 5),
+                                                  child: Wrap(
+                                                    children: _buildGenreButtons(
+                                                        _includeFilterGenres),
+                                                  ),
                                                 ),
                                         ),
                                         IconButton(
@@ -977,9 +1012,14 @@ class _MainScreenState extends State<MainScreen> {
                                                         fontSize: 12),
                                                   ),
                                                 )
-                                              : Wrap(
-                                                  children: _buildGenreButtons(
-                                                      _excludeFilterGenres),
+                                              : Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 5, left: 5),
+                                                  child: Wrap(
+                                                    children: _buildGenreButtons(
+                                                        _excludeFilterGenres),
+                                                  ),
                                                 ),
                                         ),
                                         IconButton(
