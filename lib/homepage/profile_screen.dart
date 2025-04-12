@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:iwatched/services/tmdb_service.dart';
 import 'package:iwatched/utilities/movie_dialog_util.dart';
+import 'package:iwatched/authenticationScreen/genre_preference_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final user_profile.User user;
@@ -537,14 +538,191 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(
                 height: 8,
               ),
-              SizedBox(
+              Container(
                 width: MediaQuery.of(context).size.width * 0.9,
-                child: Text(
-                  'Preferred Genres',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: const Color.fromARGB(255, 196, 195, 195),
-                  ),
+                height: 35,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Preferred Genres',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: const Color.fromARGB(255, 233, 233, 233),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () async {
+                        // Create a local copy of genres for the dialog
+                        List<String> localSelectedGenres =
+                            List<String>.from(user.selectedGenres);
+
+                        // Show dialog to edit genres
+                        showDialog(
+                          context: context,
+                          builder: (BuildContext context) {
+                            return StatefulBuilder(
+                                builder: (context, setDialogState) {
+                              return AlertDialog(
+                                backgroundColor:
+                                    const Color.fromARGB(255, 48, 48, 48),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                title: Text(
+                                  "Edit Preferred Genres",
+                                  style: TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                content: SingleChildScrollView(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Divider(color: Colors.grey),
+                                      SizedBox(height: 10),
+                                      SizedBox(
+                                        height:
+                                            MediaQuery.of(context).size.height *
+                                                0.4,
+                                        width:
+                                            MediaQuery.of(context).size.width *
+                                                0.8,
+                                        child: GridView.builder(
+                                          shrinkWrap: true,
+                                          gridDelegate:
+                                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: 3,
+                                            crossAxisSpacing: 5,
+                                            mainAxisSpacing: 6,
+                                            childAspectRatio: 2,
+                                          ),
+                                          // Use the genres list from GenrePreferenceScreen
+                                          itemCount: GenrePreferenceScreen
+                                              .genres.length,
+                                          itemBuilder: (context, index) {
+                                            String genre = GenrePreferenceScreen
+                                                .genres[index];
+                                            bool isSelected =
+                                                localSelectedGenres
+                                                    .contains(genre);
+
+                                            return GestureDetector(
+                                              onTap: () {
+                                                setDialogState(() {
+                                                  if (isSelected) {
+                                                    localSelectedGenres
+                                                        .remove(genre);
+                                                  } else {
+                                                    localSelectedGenres
+                                                        .add(genre);
+                                                  }
+                                                });
+                                              },
+                                              child: Stack(
+                                                children: [
+                                                  Container(
+                                                    alignment: Alignment.center,
+                                                    padding:
+                                                        const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      color: isSelected
+                                                          ? const Color
+                                                              .fromARGB(
+                                                              255, 160, 2, 2)
+                                                          : const Color
+                                                              .fromARGB(255,
+                                                              102, 102, 102),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              6),
+                                                    ),
+                                                    child: Text(
+                                                      genre,
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  if (isSelected)
+                                                    Positioned(
+                                                      right: 4,
+                                                      top: 4,
+                                                      child: Icon(
+                                                        Icons.check,
+                                                        color: Colors.white,
+                                                        size: 16,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.of(context).pop(); // Cancel
+                                    },
+                                    child: Text(
+                                      'Cancel',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      try {
+                                        // Update Firebase
+                                        await FirebaseFirestore.instance
+                                            .collection('users')
+                                            .doc(FirebaseAuth
+                                                .instance.currentUser!.uid)
+                                            .update({
+                                          'selectedGenres': localSelectedGenres
+                                        });
+
+                                        // Update local state
+                                        setState(() {
+                                          user.selectedGenres =
+                                              localSelectedGenres;
+                                        });
+                                        if (mounted) {
+                                          Navigator.of(context)
+                                              .pop(); // Close dialog
+                                        }
+                                      } catch (e) {
+                                        debugPrint('Error updating genres: $e');
+                                        Get.snackbar('Error',
+                                            'Failed to update preferred genres');
+                                      }
+                                    },
+                                    child: Text(
+                                      'Save',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            });
+                          },
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.edit,
+                        color: Color.fromARGB(255, 212, 212, 212),
+                        size: 22,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Container(
