@@ -35,8 +35,8 @@ class _MainScreenState extends State<MainScreen> {
   final TMDBService _tmdbService = TMDBService();
   final List<Movie> _allMovies = [];
   final List<Movie> _genreFilteredMovies = [];
-  final List<String> _includeFilterGenres = [];
-  final List<String> _excludeFilterGenres = [];
+  List<String> _includeFilterGenres = [];
+  List<String> _excludeFilterGenres = [];
   user_profile.User? _user;
   int _currentMovieIndex = 0;
   int _previousMovieIndex = 0;
@@ -58,6 +58,12 @@ class _MainScreenState extends State<MainScreen> {
     // Load user preferences
     SharedPreferences.getInstance().then((prefs) {
       _usePreferedGenres = prefs.getBool('usePreferedGenres') ?? false;
+    });
+
+    // Load genre filters
+    SharedPreferences.getInstance().then((prefs) {
+      _includeFilterGenres = prefs.getStringList('includeFilterGenres') ?? [];
+      _excludeFilterGenres = prefs.getStringList('excludeFilterGenres') ?? [];
     });
 
     _initializeData();
@@ -324,29 +330,39 @@ class _MainScreenState extends State<MainScreen> {
             return false;
           }
 
-          return !_user!.watchedMovies
-                  .any((watchedMovie) => watchedMovie.id == movie.id) &&
-              !_user!.watchLaterMovies
-                  .any((watchLaterMovie) => watchLaterMovie.id == movie.id) &&
-              !_user!.notInterestedMovies.contains(movie.id) &&
-              (includeFilter.isEmpty ||
-                  movie.genres.any((genre) => includeFilter.contains(genre))) &&
-              (excludeFilter.isEmpty ||
-                  !movie.genres.any((genre) => excludeFilter.contains(genre)));
+          // Check if movie has been interacted with
+          bool alreadyInteracted = _user!.watchedMovies
+                  .any((watchedMovie) => watchedMovie.id == movie.id) ||
+              _user!.watchLaterMovies
+                  .any((watchLaterMovie) => watchLaterMovie.id == movie.id) ||
+              _user!.notInterestedMovies.contains(movie.id);
+          
+          if (alreadyInteracted) {
+            return false;
+          }
+
+          // Apply genre filters
+          bool passesIncludeFilter = includeFilter.isEmpty || 
+              movie.genres.any((genre) => includeFilter.contains(genre));
+          
+          bool passesExcludeFilter = excludeFilter.isEmpty || 
+              !movie.genres.any((genre) => excludeFilter.contains(genre));
+          
+          return passesIncludeFilter && passesExcludeFilter;
         }).toList();
 
         setState(() {
           if (filteredMovies.isNotEmpty) {
             filteredMovies.shuffle();
-            _genreFilteredMovies.addAll(filteredMovies);
+            _allMovies.clear(); // Clear existing movies
+            _allMovies.addAll(filteredMovies); // Replace with filtered movies
             debugPrint(
-                'Added ${filteredMovies.length} new movies. Total: ${_genreFilteredMovies.length}');
+                'Added ${filteredMovies.length} new filtered movies. Total: ${_allMovies.length}');
           } else {
             // If no new movies after filtering, increment page and try again
             _tmdbService.incrementPage();
             // Schedule next fetch
-            Future.microtask(
-                () => _filteredFetchMovies(includeFilter, excludeFilter));
+            Future.microtask(() => _filteredFetchMovies(includeFilter, excludeFilter));
           }
         });
       } else {
@@ -354,19 +370,19 @@ class _MainScreenState extends State<MainScreen> {
           setState(() {
             final validMovies =
                 movies.where((movie) => movie.posterPath.isNotEmpty).toList();
-            _genreFilteredMovies.addAll(validMovies);
+            _allMovies.addAll(validMovies);
             debugPrint(
-                'Added ${validMovies.length} new movies. Total: ${_genreFilteredMovies.length}');
+                'Added ${validMovies.length} new movies. Total: ${_allMovies.length}');
           });
         }
       }
     } catch (e) {
-      debugPrint('Error fetching movies: $e');
-      if (_genreFilteredMovies.isEmpty && !_isFetching) {
+      debugPrint('Error fetching filtered movies: $e');
+      if (_allMovies.isEmpty && !_isFetching) {
         Get.snackbar(
           'Error',
-          'Failed to fetch movies. Please check your internet connection.',
-          duration: const Duration(seconds: 3),
+          'Failed to fetch movies with genre filter. Please try again.',
+          duration: const Duration(seconds: 2),
         );
       }
     } finally {
@@ -704,17 +720,17 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                       itemCount: genres.length,
                       itemBuilder: (context, index) {
-                        String genre =
-                            index < genres.length ? genres[index] : "Adult";
+                        String genre = genres[index];
+
                         bool isSelected = localSelectedGenres.contains(genre);
 
                         return GestureDetector(
                           onTap: () {
-                            // Update local state with setDialogState
                             setDialogState(() {
                               if (isSelected) {
                                 localSelectedGenres.remove(genre);
-                              } else {
+                              } else if (localSelectedGenres.isEmpty &&
+                                  !isSelected) {
                                 localSelectedGenres.add(genre);
                               }
                             });
@@ -734,10 +750,7 @@ class _MainScreenState extends State<MainScreen> {
                                 child: Text(
                                   genre,
                                   style: TextStyle(
-                                    color: isSelected
-                                        ? Colors.white
-                                        : const Color.fromARGB(
-                                            255, 255, 255, 255),
+                                    color: Colors.white,
                                     fontWeight: FontWeight.w500,
                                     fontSize: 12,
                                   ),
@@ -772,14 +785,38 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () {
-                  // Only update the parent state when Apply is pressed
+                onPressed: () async {
+                  // Find any genres that are in both lists
+                  List<String> otherList =
+                      isInclude ? _excludeFilterGenres : _includeFilterGenres;
+                  List<String> commonGenres = localSelectedGenres
+                      .where((genre) => otherList.contains(genre))
+                      .toList();
+
+                  if (commonGenres.isNotEmpty) {
+                    Get.snackbar(
+                        'Error', 'Cannot have the same genre in both lists');
+                    return;
+                  }
+
+                  // Update the appropriate list
+                  final prefs = await SharedPreferences.getInstance();
+                  if (isInclude) {
+                    await prefs.setStringList(
+                        'includeFilterGenres', localSelectedGenres);
+                  } else {
+                    await prefs.setStringList(
+                        'excludeFilterGenres', localSelectedGenres);
+                  }
+
                   setState(() {
                     // Clear the original list and add all items from the local list
                     selectedGenres.clear();
                     selectedGenres.addAll(localSelectedGenres);
                   });
-                  Navigator.of(context).pop(); // Close dialog
+                  if (mounted) {
+                    Navigator.of(context).pop(); // Close dialog
+                  }
                 },
                 child: Text(
                   'Apply',
@@ -885,6 +922,8 @@ class _MainScreenState extends State<MainScreen> {
                                       ),
                                     ),
                                     Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Container(
                                           width: MediaQuery.of(context)
@@ -915,19 +954,30 @@ class _MainScreenState extends State<MainScreen> {
                                                         fontSize: 12),
                                                   ),
                                                 )
-                                              : Wrap(
-                                                  children: _buildGenreButtons(
-                                                      _includeFilterGenres),
+                                              : Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 5, left: 5),
+                                                  child: Wrap(
+                                                    children: _buildGenreButtons(
+                                                        _includeFilterGenres),
+                                                  ),
                                                 ),
                                         ),
                                         IconButton(
                                           onPressed: () async {
-                                            await _genreSelectionDialogBuilder(
-                                                context,
-                                                true,
-                                                _includeFilterGenres);
+                                            if (localPreferedGenres) {
+                                              Get.snackbar('Error',
+                                                  'Cannot set preferred genres and must-have genres at the same time.');
+                                              return;
+                                            } else {
+                                              await _genreSelectionDialogBuilder(
+                                                  context,
+                                                  true,
+                                                  _includeFilterGenres);
 
-                                            setFilterDialogState(() {});
+                                              setFilterDialogState(() {});
+                                            }
                                           },
                                           icon: Icon(
                                             Icons.settings_rounded,
@@ -977,19 +1027,30 @@ class _MainScreenState extends State<MainScreen> {
                                                         fontSize: 12),
                                                   ),
                                                 )
-                                              : Wrap(
-                                                  children: _buildGenreButtons(
-                                                      _excludeFilterGenres),
+                                              : Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 5, left: 5),
+                                                  child: Wrap(
+                                                    children: _buildGenreButtons(
+                                                        _excludeFilterGenres),
+                                                  ),
                                                 ),
                                         ),
                                         IconButton(
                                           onPressed: () async {
-                                            await _genreSelectionDialogBuilder(
-                                                context,
-                                                false,
-                                                _excludeFilterGenres);
+                                            if (localPreferedGenres) {
+                                              Get.snackbar('Error',
+                                                  'Cannot set preferred genres and excluded genres at the same time.');
+                                              return;
+                                            } else {
+                                              await _genreSelectionDialogBuilder(
+                                                  context,
+                                                  false,
+                                                  _excludeFilterGenres);
 
-                                            setFilterDialogState(() {});
+                                              setFilterDialogState(() {});
+                                            }
                                           },
                                           icon: Icon(
                                             Icons.settings_rounded,
@@ -1053,6 +1114,8 @@ class _MainScreenState extends State<MainScreen> {
                                       });
                                       _usePreferedGenres = localPreferedGenres;
                                       Navigator.of(context).pop();
+                                      _filteredFetchMovies(_includeFilterGenres,
+                                          _excludeFilterGenres);
                                     });
                                   },
                                   child: const Text(
