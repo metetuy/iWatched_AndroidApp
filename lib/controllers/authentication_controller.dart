@@ -20,7 +20,7 @@ class AuthenticationController extends GetxController {
   File? get profileImage => pickedFile.value;
   XFile? imageFile;
 
-  pickImageFileFromGallery() async {
+  Future<void> pickImageFileFromGallery() async {
     imageFile = await ImagePicker().pickImage(source: ImageSource.gallery);
 
     if (imageFile != null) {
@@ -43,7 +43,7 @@ class AuthenticationController extends GetxController {
     return downloadUrlOfImage;
   }
 
-  captureImageFromCamera() async {
+  Future<void> captureImageFromCamera() async {
     imageFile = await ImagePicker().pickImage(source: ImageSource.camera);
 
     if (imageFile != null) {
@@ -52,7 +52,7 @@ class AuthenticationController extends GetxController {
     }
   }
 
-  createNewUser(
+  Future<void> createNewUser(
     File? imageProfile,
     String name,
     String age,
@@ -105,7 +105,7 @@ class AuthenticationController extends GetxController {
     }
   }
 
-  updateUserGenres(List<String> selectedGenres) async {
+  Future<void> updateUserGenres(List<String> selectedGenres) async {
     try {
       await FirebaseFirestore.instance
           .collection("users")
@@ -116,7 +116,7 @@ class AuthenticationController extends GetxController {
     }
   }
 
-  loginUser(String email, String password, bool keepMeLoggedIn) async {
+  Future<void> loginUser(String email, String password, bool keepMeLoggedIn) async {
     try {
       await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);

@@ -1,15 +1,14 @@
 buildscript {
-    ext.kotlin_version = '1.8.22' // Updated Kotlin version
+    ext.kotlin_version = '2.1.0'
     repositories {
         google()
-        mavenCentral() // jcenter() is deprecated
+        mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.1' // Updated AGP
+        classpath 'com.android.tools.build:gradle:8.9.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath 'com.google.gms:google-services:4.4.2'
     }
-
 }
 
 allprojects {

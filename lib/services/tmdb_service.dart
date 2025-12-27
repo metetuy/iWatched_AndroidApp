@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:iwatched/models/movie.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 class TMDBService {
   static final String _apiKey = dotenv.env['TMDB_API_KEY'] ?? '';
@@ -61,6 +62,35 @@ class TMDBService {
     } catch (e) {
       throw Exception('Failed to search movies: $e');
     }
+  }
+
+  // services/tmdb_service.dart içine bu fonksiyonu ekle:
+
+  Future<Movie?> getMovieById(int tmdbId) async {
+    try {
+      final genreMap = await _fetchGenreMap();
+      
+      final url = Uri.parse('$_baseUrl/movie/$tmdbId?api_key=$_apiKey&language=en-US');
+      // ✅ Add timeout to prevent slow requests from blocking
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        if (data['genres'] != null) {
+          List<int> genreIds = [];
+          for (var g in data['genres']) {
+            genreIds.add(g['id']);
+          }
+          data['genre_ids'] = genreIds;
+        }
+
+        return Movie.fromJson(data, genreMap);
+      }
+    } catch (e) {
+      debugPrint('Error fetching movie $tmdbId: $e');
+    }
+    return null;
   }
 
   Future<List<Movie>> getPopularMovies() async {

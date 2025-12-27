@@ -61,7 +61,7 @@ class _SplashScreenAnimationState extends State<SplashScreenAnimation>
     super.dispose();
   }
 
-  startTimer() {
+  void startTimer() {
     // Wait for 3 seconds before starting the animation
     Timer(const Duration(seconds: 3), () {
       if (mounted) {

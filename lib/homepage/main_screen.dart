@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:iwatched/homepage/profile_screen.dart';
+import 'package:iwatched/services/backend_service.dart';
 import 'package:iwatched/services/tmdb_service.dart';
 import 'package:iwatched/models/movie.dart';
 import 'package:iwatched/models/user.dart' as user_profile;
@@ -10,8 +11,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:get/get.dart';
 import 'package:iwatched/utilities/movie_dialog_util.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:iwatched/authenticationScreen/genre_preference_screen.dart';
+
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -23,31 +24,37 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final GlobalKey<State<CardSwiper>> _cardSwiperKey =
       GlobalKey<State<CardSwiper>>();
-
   final CardSwiperController controller = CardSwiperController();
+  final PageController _pageController = PageController(initialPage: 1);
 
-  int _cardsCount = 50;
+  late String _uid;
 
   // Default to Swipe Page
+
   int _selectedIndex = 1;
 
-  final PageController _pageController = PageController(initialPage: 1);
   final TMDBService _tmdbService = TMDBService();
+  final BackendService _backendService = BackendService();
+
   final List<Movie> _allMovies = [];
-  final List<Movie> _genreFilteredMovies = [];
-  List<String> _includeFilterGenres = [];
-  List<String> _excludeFilterGenres = [];
+
+  // NEW: Map to store Backend CSV Indices. Key: Movie ID (String), Value: CSV Index (int)
+  // This is required because the backend needs the specific CSV index to learn.
+  final Map<String, int> _movieBackendIndices = {};
+
   user_profile.User? _user;
+
   int _currentMovieIndex = 0;
   int _previousMovieIndex = 0;
-  bool _isFetching = false;
-  bool _usePreferedGenres = false;
+  int _lastKnownIndex = 0; //Tracks the last known index when leaving swipe page
 
   // Add these variables to track swipe history
   final List<Map<String, dynamic>> _swipeHistory = [];
 
-  // Add this variable to manually track the index
-  int _lastKnownIndex = 0;
+  // BUFFER SETTINGS
+  final int _bufferThreshold = 3; // Fetch new batch when 3 cards remain
+  final int _batchSize = 10; // How many movies to fetch per batch
+  bool _isLoadingBatch = false; // Prevent concurrent batch requests
 
   @override
   void initState() {
@@ -55,71 +62,221 @@ class _MainScreenState extends State<MainScreen> {
 
     Get.put(_pageController);
 
-    // Load user preferences
-    SharedPreferences.getInstance().then((prefs) {
-      _usePreferedGenres = prefs.getBool('usePreferedGenres') ?? false;
-    });
-
-    // Load genre filters
-    SharedPreferences.getInstance().then((prefs) {
-      _includeFilterGenres = prefs.getStringList('includeFilterGenres') ?? [];
-      _excludeFilterGenres = prefs.getStringList('excludeFilterGenres') ?? [];
-    });
-
     _initializeData();
   }
 
   Future<void> _initializeData() async {
     try {
-      await _fetchUser();
-      await _fetchMovies();
+      _uid = (await _fetchUser()) ?? '';
+      await _fetchInitialRecommendations();
     } catch (e) {
       debugPrint('Error initializing data: $e');
     }
   }
 
-  // Update the _onSwipe method to track swipes
+  // --- NEW RECOMMENDATION LOGIC (COLD START) ---
+  /// Fetches initial batch of movies (e.g., 5) on startup
+  Future<void> _fetchInitialRecommendations() async {
+    await _fetchBatchMovies(true, count: 5);
+  }
+
+  // NEW BATCH FETCH FUNCTION
+  Future<void> _fetchBatchMovies(bool isInitialFetch, {int count = 5}) async {
+    if (_isLoadingBatch) return;
+    _isLoadingBatch = true;
+
+    // ✅ Run heavy work in a microtask to not block the current frame
+    Future.microtask(() async {
+      try {
+
+        debugPrint(
+            "🎬 FETCHING BATCH (isInitial: $isInitialFetch, count: $count)");
+
+        final batch = await _backendService
+            .fetchBatchRecommendations(_uid, isInitialFetch, count: count);
+
+        if (batch.isEmpty) {
+          debugPrint("❌ Backend returned empty batch!");
+          _isLoadingBatch = false;
+          return;
+        }
+
+        // ✅ Filter duplicates BEFORE making TMDB calls
+        final newBatch = batch
+            .where(
+                (item) => !_allMovies.any((m) => int.tryParse(m.id) == item.$1))
+            .toList();
+
+        if (newBatch.isEmpty) {
+          debugPrint("⚠️ All movies were duplicates");
+          _isLoadingBatch = false;
+          return;
+        }
+
+        // ✅ Parallel fetch with shorter timeout
+        final futures = newBatch.map((item) {
+          return _tmdbService
+              .getMovieById(item.$1)
+              .timeout(const Duration(seconds: 3), onTimeout: () => null)
+              .then((movie) => MapEntry(item.$2, movie));
+        }).toList();
+
+        final results = await Future.wait(futures);
+
+        // Process results
+        final newMovies = <Movie>[];
+        final newIndices = <String, int>{};
+
+        for (final entry in results) {
+          final movie = entry.value;
+          if (movie != null) {
+            newMovies.add(movie);
+            newIndices[movie.id] = entry.key;
+          }
+        }
+
+        debugPrint(
+            "✅ Added ${newMovies.length} movies. Total: ${_allMovies.length + newMovies.length}");
+
+        // ✅ Batch update state only once
+        if (mounted && newMovies.isNotEmpty) {
+          setState(() {
+            _allMovies.addAll(newMovies);
+            _movieBackendIndices.addAll(newIndices);
+          });
+        }
+
+      } catch (e) {
+        debugPrint("❌ Batch Fetch Error: $e");
+      } finally {
+        _isLoadingBatch = false;
+      }
+    });
+  }
+
   bool _onSwipe(
       int prevIndex, int? currentIndex, CardSwiperDirection direction) {
-    // Store the swipe action for potential undo
-    _swipeHistory.add({
-      'movieIndex': _currentMovieIndex,
-      'direction': direction,
-    });
+    // 1. BOUNDS CHECK (Fast)
+    if (prevIndex >= _allMovies.length) return false;
 
-    setState(() {
-      _previousMovieIndex = prevIndex;
-      if (currentIndex != null) {
-        _currentMovieIndex = currentIndex;
-        _lastKnownIndex = currentIndex; // Save this for tracking
-      }
+    // 2. CAPTURE DATA (Fast)
+    final swipedMovie = _allMovies[prevIndex];
+    // Don't do heavy JSON serialization here if possible, but if needed, keep it light.
 
-      if (_currentMovieIndex >= (_cardsCount - 20)) {
-        _cardsCount += 30;
-      }
-    });
-
-    if (direction == CardSwiperDirection.left) {
-      //Not interested => add to the not interested list
-      debugPrint(
-          'Did not watch ${_allMovies[_previousMovieIndex].title} , index: $_previousMovieIndex');
-      _updateUserMovies(_previousMovieIndex, direction);
-    } else if (direction == CardSwiperDirection.right) {
-      //did watch => add to the watched list
-      debugPrint('Added to watched movies $_previousMovieIndex');
-      _updateUserMovies(_previousMovieIndex, direction);
-    } else if (direction == CardSwiperDirection.top) {
-      // Add to watch later
-      debugPrint('Added to watch later');
-      _updateUserMovies(_previousMovieIndex, direction);
+    // 3. UI UPDATES (Fast)
+    // Only update local variables needed for the UI.
+    // Defer everything else.
+    _previousMovieIndex = prevIndex;
+    if (currentIndex != null) {
+      _currentMovieIndex = currentIndex;
+      _lastKnownIndex = currentIndex;
     }
 
-    // Fetch more movies if we are running out
-    if (_currentMovieIndex >= _allMovies.length - 8) {
-      // Consider fetching more movies here
-      _fetchMovies();
-    }
-    return true;
+    // 4. FIRE AND FORGET (Async)
+    // Do NOT await this. Let it run in the background.
+    // We use a separate method that isolates the heavy logic.
+    _handleBackgroundLogic(
+        swipedMovie, direction, currentIndex ?? _currentMovieIndex);
+
+    return true; // Return immediately to let the animation play smoothly
+  }
+
+  void _handleBackgroundLogic(
+      Movie swipedMovie, CardSwiperDirection direction, int currentIdx) {
+    // Use Microtask to ensure this runs strictly AFTER the animation frame starts
+    Future.microtask(() {
+      // A. Backend / Firebase Logic
+      final movieJson = swipedMovie.toJson();
+      final movieId = swipedMovie.id;
+      final backendIndex = _movieBackendIndices[movieId];
+
+      String actionType = 'DISLIKE';
+      if (direction == CardSwiperDirection.right){
+        actionType = 'WATCHED';
+      }
+      else if (direction == CardSwiperDirection.top) {
+        actionType = 'WATCH_LATER';
+      }
+
+      // Fire backend calls (existing logic)
+      _processSwipeAsync(
+          swipedMovie, movieJson, movieId, direction, actionType, backendIndex);
+
+      // B. HISTORY LOGIC (Moved here to unblock UI)
+      _swipeHistory.add({
+        'movieIndex': _previousMovieIndex, // Use stored previous index
+        'direction': direction,
+      });
+
+      // C. BUFFER LOGIC - Schedule AFTER the frame is fully rendered
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final int totalMovies = _allMovies.length;
+        final int remainingCards = totalMovies - currentIdx - 1;
+
+        if (remainingCards <= _bufferThreshold && !_isLoadingBatch) {
+          debugPrint(
+              "📉 Buffer low ($remainingCards left). Fetching in post-frame...");
+          _fetchBatchMovies(false, count: _batchSize);
+        }
+      });
+    });
+  }
+
+  // ✅ Updated to use captured data instead of index
+  void _processSwipeAsync(
+      Movie movie,
+      Map<String, dynamic> movieJson,
+      String movieId,
+      CardSwiperDirection direction,
+      String actionType,
+      int? backendIndex) {
+    Future.microtask(() async {
+      try {
+        // Firebase update with captured data
+        _updateUserMoviesAsync(movie, movieJson, movieId, direction);
+
+        // Backend update
+        if (backendIndex != null) {
+          _backendService.sendSwipe(_uid, backendIndex, actionType);
+        }
+      } catch (e) {
+        debugPrint("Async swipe processing error: $e");
+      }
+    });
+  }
+
+  // ✅ Updated to use captured data
+  void _updateUserMoviesAsync(Movie movie, Map<String, dynamic> movieJson,
+      String movieId, CardSwiperDirection direction) {
+    Future.microtask(() async {
+      try {
+        if (_user == null) return;
+
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null) return;
+
+        final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+        if (direction == CardSwiperDirection.right) {
+          userRef.update({
+            'watchedMovies': FieldValue.arrayUnion([movieJson]),
+          });
+          _user!.watchedMovies.add(movie);
+        } else if (direction == CardSwiperDirection.top) {
+          userRef.update({
+            'watchLaterMovies': FieldValue.arrayUnion([movieJson]),
+          });
+          _user!.watchLaterMovies.add(movie);
+        } else if (direction == CardSwiperDirection.left) {
+          userRef.update({
+            'notInterestedMovies': FieldValue.arrayUnion([movieId]),
+          });
+          _user!.notInterestedMovies.add(movieId);
+        }
+      } catch (e) {
+        debugPrint('Async Firebase update error: $e');
+      }
+    });
   }
 
   // Replace the existing _onUndo method with this improved version
@@ -217,12 +374,11 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  Future<void> _fetchUser() async {
+  Future<String?> _fetchUser() async {
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser!.uid)
-          .get();
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final userDoc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (userDoc.exists) {
         setState(() {
           _user = user_profile.User.fromJson(userDoc.data()!);
@@ -230,236 +386,11 @@ class _MainScreenState extends State<MainScreen> {
       } else {
         debugPrint("User document does not exist.");
       }
+      return uid; // UID'yi döndür
     } catch (e) {
       debugPrint('Error fetching user: $e');
       Get.snackbar('Error', 'Error fetching user: $e');
-    }
-  }
-
-  Future<void> _updateUserMovies(
-      int movieIndex, CardSwiperDirection direction) async {
-    try {
-      // Convert existing watchedMovies list to JSON
-      if (_user == null) {
-        debugPrint("User data is null. Cannot update watch later movies.");
-        await _fetchUser();
-        if (_user == null) {
-          Get.snackbar(
-              "User data is still null", "Cannot update watch later movies.");
-          return;
-        }
-      }
-
-      //If the user swiped right, add the movie to the watched list
-      if (direction == CardSwiperDirection.right) {
-        if (_user == null) {
-          debugPrint("User data is null. Cannot update watched movies.");
-          return;
-        }
-        List<Map<String, dynamic>> updatedMovies =
-            _user!.watchedMovies.map((movie) => movie.toJson()).toList();
-        updatedMovies.add(_allMovies[movieIndex].toJson());
-        // Update Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .update({
-          'watchedMovies': updatedMovies,
-        });
-        debugPrint("Movie added to watched movies successfully!");
-      }
-      //If the user swiped up, add the movie to the watch later list
-      else if (direction == CardSwiperDirection.top) {
-        // Convert existing watchLaterMovies list to JSON
-        List<Map<String, dynamic>> updatedWatchLaterMovies =
-            _user!.watchLaterMovies.map((movie) => movie.toJson()).toList();
-
-        // Add new movie in JSON format
-        updatedWatchLaterMovies.add(_allMovies[movieIndex].toJson());
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .update({
-          'watchLaterMovies': updatedWatchLaterMovies,
-        });
-        debugPrint("Movie added to watch later movies successfully!");
-
-        //If the user swiped left, add the movie to the not interested list
-      } else if (direction == CardSwiperDirection.left) {
-        List<String> updatedNotInterestedMovies =
-            List<String>.from(_user!.notInterestedMovies);
-
-        updatedNotInterestedMovies.add(_allMovies[movieIndex].id);
-        // Update Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .update({
-          'notInterestedMovies': updatedNotInterestedMovies,
-        });
-        debugPrint("Movie added to not interested movies successfully!");
-      }
-
-      // Fetch updated user data
-      await _fetchUser();
-    } catch (e) {
-      debugPrint('Error updating user movies: $e');
-    }
-  }
-
-  //Fetch movies filtered by genre
-  Future<void> _filteredFetchMovies(
-      List<String> includeFilter, List<String> excludeFilter) async {
-    // Prevent multiple fetches
-    if (_isFetching || _allMovies.length >= _cardsCount) return;
-
-    try {
-      // Set flag first, then update UI
-      _isFetching = true;
-
-      // Update UI in a separate call
-      if (mounted) {
-        setState(() {});
-      }
-      final movies = await _tmdbService.getPopularMovies();
-
-      if (_user != null) {
-        final filteredMovies = movies.where((movie) {
-          if (movie.posterPath.isEmpty) {
-            return false;
-          }
-
-          // Check if movie has been interacted with
-          bool alreadyInteracted = _user!.watchedMovies
-                  .any((watchedMovie) => watchedMovie.id == movie.id) ||
-              _user!.watchLaterMovies
-                  .any((watchLaterMovie) => watchLaterMovie.id == movie.id) ||
-              _user!.notInterestedMovies.contains(movie.id);
-          
-          if (alreadyInteracted) {
-            return false;
-          }
-
-          // Apply genre filters
-          bool passesIncludeFilter = includeFilter.isEmpty || 
-              movie.genres.any((genre) => includeFilter.contains(genre));
-          
-          bool passesExcludeFilter = excludeFilter.isEmpty || 
-              !movie.genres.any((genre) => excludeFilter.contains(genre));
-          
-          return passesIncludeFilter && passesExcludeFilter;
-        }).toList();
-
-        setState(() {
-          if (filteredMovies.isNotEmpty) {
-            filteredMovies.shuffle();
-            _allMovies.clear(); // Clear existing movies
-            _allMovies.addAll(filteredMovies); // Replace with filtered movies
-            debugPrint(
-                'Added ${filteredMovies.length} new filtered movies. Total: ${_allMovies.length}');
-          } else {
-            // If no new movies after filtering, increment page and try again
-            _tmdbService.incrementPage();
-            // Schedule next fetch
-            Future.microtask(() => _filteredFetchMovies(includeFilter, excludeFilter));
-          }
-        });
-      } else {
-        if (mounted) {
-          setState(() {
-            final validMovies =
-                movies.where((movie) => movie.posterPath.isNotEmpty).toList();
-            _allMovies.addAll(validMovies);
-            debugPrint(
-                'Added ${validMovies.length} new movies. Total: ${_allMovies.length}');
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching filtered movies: $e');
-      if (_allMovies.isEmpty && !_isFetching) {
-        Get.snackbar(
-          'Error',
-          'Failed to fetch movies with genre filter. Please try again.',
-          duration: const Duration(seconds: 2),
-        );
-      }
-    } finally {
-      _isFetching = false;
-
-      if (mounted) {
-        setState(() {});
-      }
-    }
-  }
-
-  Future<void> _fetchMovies() async {
-    // Prevent multiple fetches
-    if (_isFetching || _allMovies.length >= _cardsCount) return;
-
-    try {
-      // Set flag first, then update UI
-      _isFetching = true;
-
-      // Update UI in a separate call
-      if (mounted) {
-        setState(() {});
-      }
-      final movies = await _tmdbService.getPopularMovies();
-
-      if (_user != null) {
-        final filteredMovies = movies.where((movie) {
-          if (movie.posterPath.isEmpty) {
-            return false;
-          }
-
-          return !_user!.watchedMovies
-                  .any((watchedMovie) => watchedMovie.id == movie.id) &&
-              !_user!.watchLaterMovies
-                  .any((watchLaterMovie) => watchLaterMovie.id == movie.id) &&
-              !_user!.notInterestedMovies.contains(movie.id);
-        }).toList();
-
-        setState(() {
-          if (filteredMovies.isNotEmpty) {
-            filteredMovies.shuffle();
-            _allMovies.addAll(filteredMovies);
-            debugPrint(
-                'Added ${filteredMovies.length} new movies. Total: ${_allMovies.length}');
-          } else {
-            // If no new movies after filtering, increment page and try again
-            _tmdbService.incrementPage();
-            // Schedule next fetch
-            Future.microtask(() => _fetchMovies());
-          }
-        });
-      } else {
-        if (mounted) {
-          setState(() {
-            final validMovies =
-                movies.where((movie) => movie.posterPath.isNotEmpty).toList();
-            _allMovies.addAll(validMovies);
-            debugPrint(
-                'Added ${validMovies.length} new movies. Total: ${_allMovies.length}');
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching movies: $e');
-      if (_allMovies.isEmpty && !_isFetching) {
-        Get.snackbar(
-          'Error',
-          'Failed to fetch movies. Please check your internet connection.',
-          duration: const Duration(seconds: 3),
-        );
-      }
-    } finally {
-      _isFetching = false;
-
-      if (mounted) {
-        setState(() {});
-      }
+      return null;
     }
   }
 
@@ -583,7 +514,7 @@ class _MainScreenState extends State<MainScreen> {
                 child: Image.network(
                   movie.posterPath,
                   width: 50,
-                  fit: BoxFit.cover,
+                  fit: BoxFit.fill,
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
                       width: 50,
@@ -670,167 +601,6 @@ class _MainScreenState extends State<MainScreen> {
 
   List<String> genres = GenrePreferenceScreen.genres;
 
-  Future<void> _genreSelectionDialogBuilder(
-      BuildContext context, bool isInclude, List<String> selectedGenres) {
-    // Create a local copy of the selected genres for use within the dialog
-    List<String> localSelectedGenres = List<String>.from(selectedGenres);
-
-    return showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(
-              "Genre Selection",
-              style: TextStyle(
-                color: Colors.red,
-                fontWeight: FontWeight.bold,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min, // Important to prevent overflow
-                children: [
-                  Divider(
-                    color: Colors.grey,
-                  ),
-                  Text(
-                    isInclude
-                        ? "Select must have genres"
-                        : "Select genres to exclude",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.4,
-                    width: MediaQuery.of(context).size.width * 0.8,
-                    child: GridView.builder(
-                      shrinkWrap: true, // Important to prevent overflow
-
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 5,
-                        mainAxisSpacing: 6,
-                        childAspectRatio: 2,
-                      ),
-                      itemCount: genres.length,
-                      itemBuilder: (context, index) {
-                        String genre = genres[index];
-
-                        bool isSelected = localSelectedGenres.contains(genre);
-
-                        return GestureDetector(
-                          onTap: () {
-                            setDialogState(() {
-                              if (isSelected) {
-                                localSelectedGenres.remove(genre);
-                              } else if (localSelectedGenres.isEmpty &&
-                                  !isSelected) {
-                                localSelectedGenres.add(genre);
-                              }
-                            });
-                          },
-                          child: Stack(
-                            children: [
-                              Container(
-                                alignment: Alignment.center,
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? const Color.fromARGB(255, 160, 2, 2)
-                                      : const Color.fromARGB(
-                                          255, 102, 102, 102),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  genre,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                              if (isSelected)
-                                Positioned(
-                                  right: 4,
-                                  top: 4,
-                                  child: Icon(Icons.check,
-                                      color: const Color.fromARGB(
-                                          255, 255, 255, 255),
-                                      size: 16),
-                                ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop(); // Cancel
-                },
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-              TextButton(
-                onPressed: () async {
-                  // Find any genres that are in both lists
-                  List<String> otherList =
-                      isInclude ? _excludeFilterGenres : _includeFilterGenres;
-                  List<String> commonGenres = localSelectedGenres
-                      .where((genre) => otherList.contains(genre))
-                      .toList();
-
-                  if (commonGenres.isNotEmpty) {
-                    Get.snackbar(
-                        'Error', 'Cannot have the same genre in both lists');
-                    return;
-                  }
-
-                  // Update the appropriate list
-                  final prefs = await SharedPreferences.getInstance();
-                  if (isInclude) {
-                    await prefs.setStringList(
-                        'includeFilterGenres', localSelectedGenres);
-                  } else {
-                    await prefs.setStringList(
-                        'excludeFilterGenres', localSelectedGenres);
-                  }
-
-                  setState(() {
-                    // Clear the original list and add all items from the local list
-                    selectedGenres.clear();
-                    selectedGenres.addAll(localSelectedGenres);
-                  });
-                  if (mounted) {
-                    Navigator.of(context).pop(); // Close dialog
-                  }
-                },
-                child: Text(
-                  'Apply',
-                  style:
-                      TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
   Widget _swipePage() {
     if (_allMovies.isEmpty) {
       return const Center(
@@ -883,259 +653,6 @@ class _MainScreenState extends State<MainScreen> {
                 icon: const Icon(Icons.info,
                     color: Color.fromARGB(255, 226, 226, 226)),
               ),
-              //Filter Button
-              IconButton(
-                onPressed: () {
-                  bool localPreferedGenres = _usePreferedGenres;
-                  showDialog(
-                      context: context,
-                      builder: (BuildContext context) {
-                        return StatefulBuilder(
-                          builder: (context, setFilterDialogState) {
-                            return AlertDialog(
-                              title: const Text(
-                                'Filter Genre',
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                              content: SingleChildScrollView(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Divider(
-                                      color: Colors.grey,
-                                    ),
-
-                                    //Select a specific genre to include
-                                    SizedBox(
-                                      child: Text(
-                                        'Must Have Genre',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Container(
-                                          width: MediaQuery.of(context)
-                                                  .size
-                                                  .width *
-                                              0.6,
-                                          constraints: BoxConstraints(
-                                            minHeight:
-                                                40, // Specific height when empty
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color.fromARGB(
-                                                255, 41, 41, 41),
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            border: Border.all(
-                                              color: const Color.fromARGB(
-                                                  255, 197, 197, 197),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          child: _includeFilterGenres.isEmpty
-                                              ? const Center(
-                                                  child: Text(
-                                                    'No genre selected',
-                                                    style: TextStyle(
-                                                        color: Colors.grey,
-                                                        fontSize: 12),
-                                                  ),
-                                                )
-                                              : Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 5, left: 5),
-                                                  child: Wrap(
-                                                    children: _buildGenreButtons(
-                                                        _includeFilterGenres),
-                                                  ),
-                                                ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () async {
-                                            if (localPreferedGenres) {
-                                              Get.snackbar('Error',
-                                                  'Cannot set preferred genres and must-have genres at the same time.');
-                                              return;
-                                            } else {
-                                              await _genreSelectionDialogBuilder(
-                                                  context,
-                                                  true,
-                                                  _includeFilterGenres);
-
-                                              setFilterDialogState(() {});
-                                            }
-                                          },
-                                          icon: Icon(
-                                            Icons.settings_rounded,
-                                            size: 22,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    SizedBox(
-                                      child: Text(
-                                        'Exclude Genre',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    Row(
-                                      children: [
-                                        Container(
-                                          width: MediaQuery.of(context)
-                                                  .size
-                                                  .width *
-                                              0.6,
-                                          constraints: BoxConstraints(
-                                            minHeight:
-                                                40, // Specific height when empty
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color.fromARGB(
-                                                255, 41, 41, 41),
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            border: Border.all(
-                                              color: const Color.fromARGB(
-                                                  255, 197, 197, 197),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          child: _excludeFilterGenres.isEmpty
-                                              ? const Center(
-                                                  child: Text(
-                                                    'No genre selected',
-                                                    style: TextStyle(
-                                                        color: Colors.grey,
-                                                        fontSize: 12),
-                                                  ),
-                                                )
-                                              : Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 5, left: 5),
-                                                  child: Wrap(
-                                                    children: _buildGenreButtons(
-                                                        _excludeFilterGenres),
-                                                  ),
-                                                ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () async {
-                                            if (localPreferedGenres) {
-                                              Get.snackbar('Error',
-                                                  'Cannot set preferred genres and excluded genres at the same time.');
-                                              return;
-                                            } else {
-                                              await _genreSelectionDialogBuilder(
-                                                  context,
-                                                  false,
-                                                  _excludeFilterGenres);
-
-                                              setFilterDialogState(() {});
-                                            }
-                                          },
-                                          icon: Icon(
-                                            Icons.settings_rounded,
-                                            size: 22,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    //Select a specific genre to never show
-                                    //Check button for implementing prefered genres
-                                    Row(
-                                      children: [
-                                        Switch(
-                                          overlayColor: overlayColor,
-                                          trackColor: trackColor,
-                                          thumbColor: thumbColor,
-                                          thumbIcon: thumbIcon,
-                                          value: localPreferedGenres,
-                                          onChanged: (bool value) {
-                                            setFilterDialogState(() {
-                                              localPreferedGenres = value;
-                                            });
-                                          },
-                                        ),
-                                        Text(
-                                          'Activate Preferred Genres Filter',
-                                          style: TextStyle(
-                                            color: const Color.fromARGB(
-                                                255, 255, 255, 255),
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  ],
-                                ),
-                              ),
-                              contentPadding: const EdgeInsets.only(
-                                  top: 10, left: 15, right: 15, bottom: 0),
-                              actions: <Widget>[
-                                TextButton(
-                                  onPressed: () {
-                                    Navigator.of(context).pop();
-                                  },
-                                  child: const Text(
-                                    'Cancel',
-                                    style: TextStyle(
-                                      color: Colors.red,
-                                    ),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    setState(() async {
-                                      //Save to SharedPreferences
-                                      await SharedPreferences.getInstance()
-                                          .then((prefs) {
-                                        prefs.setBool('usePreferedGenres',
-                                            localPreferedGenres);
-                                      });
-                                      _usePreferedGenres = localPreferedGenres;
-                                      Navigator.of(context).pop();
-                                      _filteredFetchMovies(_includeFilterGenres,
-                                          _excludeFilterGenres);
-                                    });
-                                  },
-                                  child: const Text(
-                                    'Apply',
-                                    style: TextStyle(
-                                      color: Colors.red,
-                                    ),
-                                  ),
-                                )
-                              ],
-                            );
-                          },
-                        );
-                      });
-                },
-                icon: const Icon(
-                  Icons.filter_list_alt,
-                  color: Color.fromARGB(255, 226, 226, 226),
-                ),
-              ),
             ],
           ),
           Expanded(
@@ -1143,7 +660,7 @@ class _MainScreenState extends State<MainScreen> {
             child: CardSwiper(
               key: _cardSwiperKey,
               controller: controller,
-              cardsCount: _cardsCount,
+              cardsCount: _allMovies.length, // Add extra cards for loading
               scale: 0.7,
               onSwipe: _onSwipe,
               onUndo: _onUndo,
@@ -1156,13 +673,6 @@ class _MainScreenState extends State<MainScreen> {
                   _currentMovieIndex, // Set initialIndex when creating
               cardBuilder:
                   (context, index, percentThresholdX, percentThresholdY) {
-                // Start fetching earlier
-                if (index >= _allMovies.length - 15 && !_isFetching) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _fetchMovies();
-                  });
-                }
-
                 if (index >= _allMovies.length) {
                   return const Center(
                     child: Column(
@@ -1192,6 +702,7 @@ class _MainScreenState extends State<MainScreen> {
                       onLater: () => controller.swipe(CardSwiperDirection.top),
                     );
                   },
+  
                   child: Stack(
                     children: [
                       Container(
@@ -1204,8 +715,9 @@ class _MainScreenState extends State<MainScreen> {
                           borderRadius: BorderRadius.circular(26),
                           image: DecorationImage(
                             image: NetworkImage(
-                                "https://image.tmdb.org/t/p/w500${movie.posterPath}"),
-                            fit: BoxFit.fill,
+                                movie.posterPath), // ✅ Already full URL
+                            fit: BoxFit
+                                .fill, // Also: use cover instead of fill for better aspect ratio
                           ),
                         ),
                       ),
