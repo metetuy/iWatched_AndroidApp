@@ -126,6 +126,3 @@ backend/*.jsonl
 backend/*.csv
 !backend/example.csv
 
-#ios and mac podfile
-**/ios/podfile
-**/macos/podfile
