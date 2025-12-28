@@ -45,6 +45,7 @@ app.*.map.json
 /android/app/release
 
 .env
+.venv
 
 #Firebase config files
 google-services.json
@@ -78,3 +79,53 @@ build/
 
 # Secret mapping files that might contain API keys
 mapping.txt
+
+# VS Code settings folder
+.vscode/
+# Local pod files
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework/
+ios/Flutter/Flutter.podspec
+ios/ServiceDefinitions.json
+# Xcode build files
+ios/build/
+ios/DerivedData/
+# Xcode workspace shared data
+ios/Runner.xcworkspace/xcshareddata/
+# CocoaPods lock file
+ios/Podfile.lock
+# Flutter generated plugin registrant
+ios/Flutter/GeneratedPluginRegistrant.*dart
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~.bak
+*.orig
+*.rej
+# Crashlytics build logs
+crashlytics-build.log
+# Android local configuration file (sdk path, etc)
+local.properties
+
+
+movies_dataset_final.csv
+
+# Firebase Service Account Key (CRITICAL - never commit)
+serviceAccountKey.json
+**/serviceAccountKey.json
+backend/serviceAccountKey.json
+
+# Backend model files (large files)
+*.pkl
+model_data.pkl
+
+# Backend data files
+backend/*.jsonl
+backend/*.csv
+!backend/example.csv
+
+#ios and mac podfile
+**/ios/podfile
+**/macos/podfile
