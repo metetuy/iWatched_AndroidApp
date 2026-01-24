@@ -12,6 +12,8 @@
 .swiftpm/
 migrate_working_dir/
 
+
+
 # IntelliJ related
 *.iml
 *.ipr
@@ -82,6 +84,7 @@ mapping.txt
 
 # VS Code settings folder
 .vscode/
+
 
 # Local pod files
 ios/Pods/

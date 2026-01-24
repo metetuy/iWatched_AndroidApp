@@ -60,9 +60,10 @@ MIN_VOTE_COUNT = 100
 MIN_VOTE_AVERAGE = 5.5
 
 # --- SCORING WEIGHTS ---
-POPULARITY_WEIGHT = 0.3
-CONTENT_WEIGHT = 0.4
-RATING_WEIGHT = 0.3
+POPULARITY_WEIGHT = 0.35
+CONTENT_WEIGHT = 0.35
+RATING_WEIGHT = 0.20
+VOTE_COUNT_WEIGHT = 0.10
 
 SEQUEL_PENALTY = 0.25  # Penalty multiplier for sequel/similar titles
 
@@ -138,6 +139,10 @@ class RecommendationEngine:
         # Normalize ratings to [0, 1] range
         self.df['vote_average'] = pd.to_numeric(self.df['vote_average'], errors='coerce').fillna(0)
         self.df['norm_rating'] = self.df['vote_average'] / 10.0
+
+        self.df['vote_count'] = pd.to_numeric(self.df['vote_count'], errors='coerce').fillna(0)
+        self.df['log_vote_count'] = np.log1p(self.df['vote_count'])
+        self.df['norm_vote_count'] = scaler.fit_transform(self.df[['log_vote_count']].values).flatten()
         
         # Create content "soup" for TF-IDF vectorization
         print("   -> Creating feature vectors (weighted by cast and director)...")
@@ -486,11 +491,13 @@ class RecommendationEngine:
             similarity_score = 1 - distances[0][i]
             pop_score = movie['norm_popularity']
             rating_score = movie['norm_rating']
+            vote_count_score = movie.get('norm_vote_count', 0)
             
             final_score = (
                 (similarity_score * CONTENT_WEIGHT) + 
                 (pop_score * POPULARITY_WEIGHT) +
-                (rating_score * RATING_WEIGHT)
+                (rating_score * RATING_WEIGHT) +
+                (vote_count_score * VOTE_COUNT_WEIGHT)
             )
             
             # Apply sequel penalty to avoid recommending too many similar titles
@@ -505,6 +512,7 @@ class RecommendationEngine:
                 "similarity": similarity_score,
                 "popularity": pop_score,
                 "rating": rating_score,
+                "vote_count": vote_count_score,
                 "is_sequel": is_sequel
             })
             
