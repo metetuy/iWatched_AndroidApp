@@ -16,7 +16,7 @@ class SwipeActionButtons extends StatelessWidget {
           _ActionButton(
             icon: Icons.close_rounded,
             color: Colors.red,
-            size: 35,
+            size: 30,
             onPressed: () => controller.swipe(CardSwiperDirection.left),
           ),
           _ActionButton(
@@ -26,6 +26,11 @@ class SwipeActionButtons extends StatelessWidget {
             size: 30,
             onPressed: () => controller.undo(),
           ),
+          _ActionButton(
+              icon: Icons.favorite,
+              color: const Color.fromARGB(255, 107, 21, 245),
+              size: 35,
+              onPressed: () => controller.swipe(CardSwiperDirection.bottom)),
           _ActionButton(
             icon: Icons.alarm_add,
             color: const Color.fromARGB(255, 21, 118, 245),

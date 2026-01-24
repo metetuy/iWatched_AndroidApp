@@ -38,20 +38,20 @@ class SwipeController extends GetxController {
 
   Future<void> _initialize() async {
     _uid = await _fetchUser() ?? '';
-    
+
     // DEBUG: Check what we got
     debugPrint("═══════════════════════════════════════════");
-    debugPrint("🔐 INIT DEBUG");
+    debugPrint("INIT DEBUG");
     debugPrint("   _uid after fetch: '$_uid'");
     debugPrint("   _uid is empty: ${_uid.isEmpty}");
     debugPrint("═══════════════════════════════════════════");
-    
+
     if (_uid.isEmpty) {
-      debugPrint("❌ Cannot fetch recommendations - UID is empty!");
+      debugPrint("Cannot fetch recommendations - UID is empty!");
       isLoading.value = false;
       return;
     }
-    
+
     await fetchInitialRecommendations();
   }
 
@@ -59,30 +59,30 @@ class SwipeController extends GetxController {
     try {
       // Check if user is logged in first
       final currentUser = FirebaseAuth.instance.currentUser;
-      
-      debugPrint("🔍 Checking Firebase Auth...");
-      debugPrint("   currentUser: $currentUser");
-      debugPrint("   currentUser is null: ${currentUser == null}");
-      
+
+      debugPrint("Checking Firebase Auth...");
+      debugPrint("currentUser: $currentUser");
+      debugPrint("currentUser is null: ${currentUser == null}");
+
       if (currentUser == null) {
-        debugPrint("❌ No user logged in!");
+        debugPrint("No user logged in!");
         return null;
       }
-      
+
       final uid = currentUser.uid;
-      debugPrint("   UID from Firebase Auth: $uid");
-      
+      debugPrint("UID from Firebase Auth: $uid");
+
       final userDoc =
           await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (userDoc.exists) {
         user.value = user_profile.User.fromJson(userDoc.data()!);
-        debugPrint("   ✅ User document loaded");
+        debugPrint("   User document loaded");
       } else {
-        debugPrint("   ⚠️ User document doesn't exist in Firestore");
+        debugPrint("   User document doesn't exist in Firestore");
       }
       return uid;
     } catch (e, stackTrace) {
-      debugPrint('❌ Error fetching user: $e');
+      debugPrint('Error fetching user: $e');
       debugPrint('Stack trace: $stackTrace');
       return null;
     }
@@ -92,10 +92,11 @@ class SwipeController extends GetxController {
     await _fetchBatchMovies(isInitial: true, count: 5);
   }
 
-  Future<void> _fetchBatchMovies({required bool isInitial, int count = 5}) async {
+  Future<void> _fetchBatchMovies(
+      {required bool isInitial, int count = 5}) async {
     if (_isLoadingBatch) return;
     _isLoadingBatch = true;
-    
+
     if (isInitial) isLoading.value = true;
 
     try {
@@ -106,7 +107,7 @@ class SwipeController extends GetxController {
       );
 
       if (batch.isEmpty) {
-        debugPrint("❌ Backend returned empty batch!");
+        debugPrint("Backend returned empty batch!");
         return;
       }
 
@@ -116,7 +117,7 @@ class SwipeController extends GetxController {
           .toList();
 
       if (newBatch.isEmpty) {
-        debugPrint("⚠️ All movies were duplicates");
+        debugPrint("All movies were duplicates");
         return;
       }
 
@@ -146,9 +147,9 @@ class SwipeController extends GetxController {
         _movieBackendIndices.addAll(newIndices);
       }
 
-      debugPrint("✅ Added ${newMovies.length} movies. Total: ${movies.length}");
+      debugPrint("Added ${newMovies.length} movies. Total: ${movies.length}");
     } catch (e) {
-      debugPrint("❌ Batch Fetch Error: $e");
+      debugPrint("Batch Fetch Error: $e");
     } finally {
       _isLoadingBatch = false;
       isLoading.value = false;
@@ -158,16 +159,17 @@ class SwipeController extends GetxController {
   void checkAndFetchMoreIfNeeded(int currentIdx) {
     final remainingCards = movies.length - currentIdx - 1;
     if (remainingCards <= _bufferThreshold && !_isLoadingBatch) {
-      debugPrint("📉 Buffer low ($remainingCards left). Fetching...");
+      debugPrint("Buffer low ($remainingCards left). Fetching...");
       _fetchBatchMovies(isInitial: false, count: _batchSize);
     }
   }
 
-  bool handleSwipe(int prevIndex, int? newIndex, CardSwiperDirection direction) {
+  bool handleSwipe(
+      int prevIndex, int? newIndex, CardSwiperDirection direction) {
     if (prevIndex >= movies.length) return false;
 
     final swipedMovie = movies[prevIndex];
-    
+
     if (newIndex != null) {
       currentIndex.value = newIndex;
     }
@@ -213,6 +215,8 @@ class SwipeController extends GetxController {
         return 'WATCHED';
       case CardSwiperDirection.top:
         return 'WATCH_LATER';
+      case CardSwiperDirection.bottom:
+        return 'LIKED';
       default:
         return 'DISLIKE';
     }
@@ -230,16 +234,28 @@ class SwipeController extends GetxController {
 
       switch (direction) {
         case CardSwiperDirection.right:
-          userRef.update({'watchedMovies': FieldValue.arrayUnion([movieJson])});
+          userRef.update({
+            'watchedMovies': FieldValue.arrayUnion([movieJson])
+          });
           user.value!.watchedMovies.add(movie);
           break;
         case CardSwiperDirection.top:
-          userRef.update({'watchLaterMovies': FieldValue.arrayUnion([movieJson])});
+          userRef.update({
+            'watchLaterMovies': FieldValue.arrayUnion([movieJson])
+          });
           user.value!.watchLaterMovies.add(movie);
           break;
         case CardSwiperDirection.left:
-          userRef.update({'notInterestedMovies': FieldValue.arrayUnion([movieId])});
+          userRef.update({
+            'notInterestedMovies': FieldValue.arrayUnion([movieId])
+          });
           user.value!.notInterestedMovies.add(movieId);
+          break;
+        case CardSwiperDirection.bottom:
+          userRef.update({
+            'likedMovies' : FieldValue.arrayUnion([movieJson])
+          });
+          user.value!.likedMovies.add(movie);
           break;
         default:
           break;
@@ -247,7 +263,8 @@ class SwipeController extends GetxController {
     });
   }
 
-  bool handleUndo(int? previousIndex, int currentIdx, CardSwiperDirection direction) {
+  bool handleUndo(
+      int? previousIndex, int currentIdx, CardSwiperDirection direction) {
     if (_swipeHistory.isEmpty) {
       Get.snackbar('Undo Error', 'No more actions to undo');
       return false;

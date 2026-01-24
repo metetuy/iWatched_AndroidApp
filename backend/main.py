@@ -95,13 +95,13 @@ class RecommendationEngine:
 
         # Load existing model or train from scratch
         if os.path.exists(self.model_path):
-            print(f"📦 Found saved model: {self.model_path}")
+            print(f"Found saved model: {self.model_path}")
             self.load_model()
         else:
-            print("⚙️ No saved model found. Training from scratch...")
+            print(" No saved model found. Training from scratch...")
             self.train_and_save_model()
 
-        print("✅ System initialized and Firebase connected!")
+        print(" System initialized and Firebase connected!")
 
     def train_and_save_model(self) -> None:
         """Train the recommendation model and save to disk."""
@@ -158,7 +158,7 @@ class RecommendationEngine:
         self.model.fit(self.movie_vectors)
         
         # Save model to disk
-        print(f"   💾 Saving model to disk: {self.model_path}")
+        print(f"    Saving model to disk: {self.model_path}")
         save_data = {
             'df': self.df,
             'tmdb_id_to_index': self.tmdb_id_to_index,
@@ -167,7 +167,7 @@ class RecommendationEngine:
             'model': self.model
         }
         joblib.dump(save_data, self.model_path)
-        print("   ✅ Model saved successfully!")
+        print("   Model saved successfully!")
 
     def load_model(self) -> None:
         """Load pre-trained model from disk."""
@@ -179,7 +179,7 @@ class RecommendationEngine:
         self.tfidf = data['tfidf']
         self.movie_vectors = data['movie_vectors']
         self.model = data['model']
-        print("   ✅ Model loaded successfully!")
+        print("    Model loaded successfully!")
 
     def clean_data(self, x: Any) -> str:
         """
@@ -236,7 +236,7 @@ class RecommendationEngine:
             
             # Define which lists contribute to profile (positive interactions only)
             profile_actions: List[tuple[str, str]] = [
-                ('likedMovies', 'LIKE'),
+                ('likedMovies', 'LIKED'),
                 ('watchedMovies', 'WATCHED'),
                 ('watchLaterMovies', 'WATCH_LATER'),
                 # Note: notInterestedMovies excluded from profile to avoid negative drift
@@ -303,7 +303,7 @@ class RecommendationEngine:
     def _update_profile_internal(self, user_id: str, movie_index: int, action: str) -> None:
         """
         Internal method to update user profile vector based on movie interaction.
-        Weights: LIKE=1.0, WATCH_LATER=0.5, WATCHED=0.2, DISLIKE=-0.5
+        Weights: LIKED=1.0, WATCH_LATER=0.5, WATCHED=0.2, DISLIKE=-0.5
         """
         user_vec = self.user_profiles[user_id]
         try:
@@ -312,14 +312,14 @@ class RecommendationEngine:
         except IndexError:
             return
 
-        weights = {'LIKE': 1.0, 'WATCH_LATER': 0.5, 'WATCHED': 0.2, 'DISLIKE': -0.5}
+        weights = {'LIKED': 1.0, 'WATCH_LATER': 0.5, 'WATCHED': 0.2, 'DISLIKE': -0.5}
         weight = weights.get(action, 0)
         
         self.user_profiles[user_id] = user_vec + (movie_vec * weight)
         self.user_seen_movies[user_id].add(movie_index)
         
         # Track liked titles for sequel detection
-        if action in ['LIKE', 'WATCHED', 'WATCH_LATER']:
+        if action in ['LIKED', 'WATCHED', 'WATCH_LATER']:
             if movie_title not in self.user_liked_titles[user_id]:
                 self.user_liked_titles[user_id].append(movie_title)
 
@@ -335,7 +335,7 @@ class RecommendationEngine:
         movie_genres = str(self.df.iloc[movie_index].get('genres', '')) if movie_index < len(self.df) else ""
         
         debug_print(f"═══════════════════════════════════════════", "HEADER")
-        debug_print(f"👆 SWIPE RECEIVED", "HEADER")
+        debug_print(f" SWIPE RECEIVED", "HEADER")
         debug_print(f"═══════════════════════════════════════════", "HEADER")
         debug_print(f"  User: {user_id[:8]}...", "INFO")
         debug_print(f"  Movie: {movie_title}", "INFO")
@@ -343,7 +343,7 @@ class RecommendationEngine:
         debug_print(f"  Action: {action}", "INFO")
         debug_print(f"  Index: {movie_index}", "DATA")
         
-        weights = {'LIKE': 1.0, 'WATCH_LATER': 0.5, 'WATCHED': 0.2, 'DISLIKE': -0.5}
+        weights = {'LIKED': 1.0, 'WATCH_LATER': 0.5, 'WATCHED': 0.2, 'DISLIKE': -0.5}
         weight = weights.get(action, 0)
         debug_print(f"  Weight Applied: {weight:+.1f}", "DATA")
         
@@ -376,7 +376,7 @@ class RecommendationEngine:
         2. Hybrid Ranking (is_initial_fetch=False): Uses KNN + popularity + rating scoring
         """
         debug_print(f"═══════════════════════════════════════════", "HEADER")
-        debug_print(f"🎬 RECOMMENDATION REQUEST", "HEADER")
+        debug_print(f" RECOMMENDATION REQUEST", "HEADER")
         debug_print(f"═══════════════════════════════════════════", "HEADER")
         debug_print(f"  User: {user_id[:8]}...", "INFO")
         debug_print(f"  Requested: {count} movies", "INFO")
@@ -392,7 +392,7 @@ class RecommendationEngine:
         
         # Strategy 1: Cold Start - Use for new users or initial fetch
         if is_initial_fetch:
-            debug_print("  ❄️  Using COLD START strategy", "WARNING")
+            debug_print("   Using COLD START strategy", "WARNING")
             
             # Filter to high-quality movies only
             quality_movies = self.df[
@@ -436,7 +436,7 @@ class RecommendationEngine:
             return recommendations
 
         # Strategy 2: Hybrid Ranking - Use KNN similarity + popularity + rating
-        debug_print("  🔥 Using HYBRID RANKING strategy", "SUCCESS")
+        debug_print("  Using HYBRID RANKING strategy", "SUCCESS")
         
         # Normalize user vector to prevent negative drift from dislikes
         user_vec_normalized = user_vec.copy()
@@ -461,7 +461,7 @@ class RecommendationEngine:
         feature_names = self.tfidf.get_feature_names_out()
         feature_scores = list(zip(feature_names, user_vec_normalized))
         top_features = sorted(feature_scores, key=lambda x: x[1], reverse=True)[:10]
-        debug_print(f"\n  🧠 User Top Interests (normalized):", "INFO")
+        debug_print(f"\n   User Top Interests (normalized):", "INFO")
         for word, score in top_features:
             if score > 0:
                 debug_print(f"    • {word}: {score:.4f}", "DATA")
@@ -470,7 +470,7 @@ class RecommendationEngine:
         n_candidates = count * 20
         distances, indices = self.model.kneighbors([user_vec_normalized], n_neighbors=n_candidates)
         
-        debug_print(f"\n  🔍 KNN returned {len(indices[0])} candidates", "INFO")
+        debug_print(f"\n   KNN returned {len(indices[0])} candidates", "INFO")
         
         # Score and filter candidates
         candidates = []
@@ -522,7 +522,7 @@ class RecommendationEngine:
         # Sort by score and take top N
         candidates = sorted(candidates, key=lambda x: x['score'], reverse=True)[:count]
         
-        debug_print(f"\n  📋 HYBRID RESULTS:", "SUCCESS")
+        debug_print(f"\n   HYBRID RESULTS:", "SUCCESS")
         for i, c in enumerate(candidates):
             genres = c['data'].get('genres', 'N/A')
             debug_print(f"    {i+1}. {c['data']['title'][:35]}", "DATA")
@@ -562,7 +562,7 @@ class SwipeRequest(BaseModel):
     """Request model for swipe endpoint."""
     user_id: str
     movie_index: int
-    action: str  # LIKE, WATCHED, WATCH_LATER, DISLIKE
+    action: str  # LIKED, WATCHED, WATCH_LATER, DISLIKE
 
 
 # --- API ENDPOINTS ---

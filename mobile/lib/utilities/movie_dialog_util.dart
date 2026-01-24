@@ -9,7 +9,7 @@ class MovieDialogUtil {
   /// - movie: Movie object containing the details
   /// - genreButtonBuilder: Function to build genre buttons
   /// - onClose: Optional callback when dialog is closed
-  /// - onWatched/onSkip/onLater: Optional callbacks for action buttons
+  /// - onWatched/onSkip/onLater/onLike: Optional callbacks for action buttons
   static Future<void> showMovieDetailsDialog({
     required BuildContext context,
     required Movie movie,
@@ -18,6 +18,7 @@ class MovieDialogUtil {
     VoidCallback? onWatched,
     VoidCallback? onSkip,
     VoidCallback? onLater,
+    VoidCallback? onLike,
   }) {
     return Navigator.of(context).push(
       PageRouteBuilder(
@@ -173,7 +174,8 @@ class MovieDialogUtil {
                               // Add action buttons if callbacks are provided
                               if (onWatched != null ||
                                   onSkip != null ||
-                                  onLater != null)
+                                  onLater != null ||
+                                  onLike != null)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 24.0),
                                   child: Row(
@@ -198,6 +200,17 @@ class MovieDialogUtil {
                                           onTap: () {
                                             Navigator.of(context).pop();
                                             onLater();
+                                          },
+                                        ),
+                                      if (onLike != null)
+                                        _buildActionButton(
+                                          icon: Icons.favorite,
+                                          color:
+                                              Color.fromARGB(255, 107, 21, 245),
+                                          label: "Liked",
+                                          onTap: () {
+                                            Navigator.of(context).pop();
+                                            onLike();
                                           },
                                         ),
                                       if (onWatched != null)

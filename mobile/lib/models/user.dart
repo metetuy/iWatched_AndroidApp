@@ -16,6 +16,7 @@ class User {
   List<Movie> watchedMovies = [];
   List<Movie> watchLaterMovies = [];
   List<String> notInterestedMovies = [];
+  List<Movie> likedMovies = [];
 
   User({
     this.imageProfile,
@@ -29,6 +30,7 @@ class User {
     this.watchedMovies = const [],
     this.watchLaterMovies = const [],
     this.notInterestedMovies = const [],
+    this.likedMovies = const [],
   });
 
   static User fromDataSnapshot(DocumentSnapshot snapshot) {
@@ -45,6 +47,7 @@ class User {
       watchedMovies: List<Movie>.from(data['watchedMovies']),
       watchLaterMovies: List<Movie>.from(data['watchLaterMovies']),
       notInterestedMovies: List<String>.from(data['notInterestedMovies']),
+      likedMovies: List<Movie>.from(data['likedMovies']),
     );
   }
 
@@ -61,6 +64,7 @@ class User {
       'watchedMovies': watchedMovies,
       'watchLaterMovies': watchLaterMovies,
       'notInterestedMovies': notInterestedMovies,
+      'likedMovies': likedMovies,
     };
   }
 
@@ -81,6 +85,9 @@ class User {
           .map((movie) => Movie.fromJustJson(movie))
           .toList(),
       notInterestedMovies: List<String>.from(json['notInterestedMovies']),
+      likedMovies: (json['likedMovies'] as List)
+          .map((movie) => Movie.fromJustJson(movie))
+          .toList(),
     );
   }
 }

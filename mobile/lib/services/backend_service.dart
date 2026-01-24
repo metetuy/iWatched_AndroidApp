@@ -10,14 +10,14 @@ class BackendService {
   Future<List<(int, int)>> fetchBatchRecommendations(String userId, bool isInitialFetch, {int count = 5}) async {
     
     debugPrint("═══════════════════════════════════════════");
-    debugPrint("🌐 BACKEND REQUEST");
+    debugPrint("BACKEND REQUEST");
     debugPrint("═══════════════════════════════════════════");
-    debugPrint("   User ID: $userId");
-    debugPrint("   Is Initial: $isInitialFetch");
-    debugPrint("   Count: $count");
+    debugPrint("User ID: $userId");
+    debugPrint("Is Initial: $isInitialFetch");
+    debugPrint("Count: $count");
     
     if (userId.isEmpty) {
-      debugPrint("   ❌ ERROR: User ID is empty!");
+      debugPrint("ERROR: User ID is empty!");
       return [];
     }
     
@@ -28,12 +28,12 @@ class BackendService {
     debugPrint("   URL: $endpoint");
     
     try {
-      debugPrint("   📡 Sending request...");
+      debugPrint("   Sending request...");
       
       final response = await http.get(Uri.parse(endpoint))
           .timeout(const Duration(seconds: 15));
       
-      debugPrint("   ✅ Response received!");
+      debugPrint("   Response received!");
       debugPrint("   Status Code: ${response.statusCode}");
       debugPrint("   Body length: ${response.body.length}");
       debugPrint("   Body: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}...");
@@ -42,30 +42,30 @@ class BackendService {
         final data = json.decode(response.body);
         final List<dynamic> results = data['results'];
         
-        debugPrint("   📦 Parsed ${results.length} results");
+        debugPrint("   Parsed ${results.length} results");
         
         List<(int, int)> batch = [];
         for (var item in results) {
           batch.add((item['tmdb_id'] as int, item['index'] as int));
         }
         
-        debugPrint("   ✅ Returning ${batch.length} movies");
+        debugPrint("   Returning ${batch.length} movies");
         debugPrint("═══════════════════════════════════════════");
         return batch;
       } else {
-        debugPrint("   ❌ Non-200 status: ${response.statusCode}");
+        debugPrint("   Non-200 status: ${response.statusCode}");
         debugPrint("   Body: ${response.body}");
       }
     } on SocketException catch (e) {
-      debugPrint("   ❌ SOCKET ERROR: Cannot connect to server!");
+      debugPrint("   SOCKET ERROR: Cannot connect to server!");
       debugPrint("   Details: $e");
-      debugPrint("   💡 Is the backend running? Try: uvicorn main:app --host 0.0.0.0 --port 5000");
+      debugPrint("   Is the backend running? Try: uvicorn main:app --host 0.0.0.0 --port 5000");
     } on http.ClientException catch (e) {
-      debugPrint("   ❌ CLIENT ERROR: $e");
+      debugPrint("   CLIENT ERROR: $e");
     } on FormatException catch (e) {
-      debugPrint("   ❌ JSON PARSE ERROR: $e");
+      debugPrint("   JSON PARSE ERROR: $e");
     } catch (e) {
-      debugPrint("   ❌ UNEXPECTED ERROR: $e");
+      debugPrint("   UNEXPECTED ERROR: $e");
       debugPrint("   Type: ${e.runtimeType}");
     }
     

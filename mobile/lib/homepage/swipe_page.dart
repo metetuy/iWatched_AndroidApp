@@ -68,7 +68,7 @@ class SwipePage extends StatelessWidget {
       }
 
       return SafeArea(
-        bottom: false, // Don't add padding at bottom (BottomNav handles it)
+        bottom: false,
         child: Column(
           children: [
             Align(
@@ -85,7 +85,7 @@ class SwipePage extends StatelessWidget {
               ),
             ),
 
-            // Card swiper - now takes maximum space
+            // Card swiper
             Expanded(
               child: CardSwiper(
                 controller: cardController,
@@ -93,11 +93,7 @@ class SwipePage extends StatelessWidget {
                 scale: 0.7,
                 onSwipe: controller.handleSwipe,
                 onUndo: controller.handleUndo,
-                allowedSwipeDirection: AllowedSwipeDirection.only(
-                  right: true,
-                  left: true,
-                  up: true,
-                ),
+                allowedSwipeDirection: AllowedSwipeDirection.all(),
                 initialIndex: controller.currentIndex.value,
                 cardBuilder:
                     (context, index, percentThresholdX, percentThresholdY) {
@@ -130,6 +126,8 @@ class SwipePage extends StatelessWidget {
                             cardController.swipe(CardSwiperDirection.left),
                         onLater: () =>
                             cardController.swipe(CardSwiperDirection.top),
+                        onLike: () => 
+                            cardController.swipe(CardSwiperDirection.bottom)
                       );
                     },
                   );
