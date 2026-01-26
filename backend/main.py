@@ -658,3 +658,16 @@ def debug_knn(user_id: str, top_words: int = 20, top_candidates: int = 10):
         "genre_distribution_in_results": dict(sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)),
         "knn_candidates": candidates[:top_candidates]
     }
+
+@app.get("/lookup/{tmdb_id}")
+def lookup_movie_index(tmdb_id: int):
+    """Look up the backend index for a given TMDB ID."""
+    debug_print(f"Looking up index for TMDB ID: {tmdb_id}", "INFO")
+    
+    if tmdb_id in engine.tmdb_id_to_index:
+        index = engine.tmdb_id_to_index[tmdb_id]
+        debug_print(f"Found index {index} for TMDB ID {tmdb_id}", "SUCCESS")
+        return {"tmdb_id": tmdb_id, "index": index}
+    
+    debug_print(f"TMDB ID {tmdb_id} not found in dataset", "WARNING")
+    return {"tmdb_id": tmdb_id, "index": None}

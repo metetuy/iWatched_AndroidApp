@@ -8,6 +8,7 @@ class Movie {
   final double rating;
   final String overview;
   final String backdropPath;
+  final int? backendIndex;
 
   Movie({
     required this.id,
@@ -19,7 +20,23 @@ class Movie {
     required this.rating,
     required this.overview,
     required this.backdropPath,
+    this.backendIndex,
   });
+
+  Movie copyWith({int? backendIndex}) {
+    return Movie(
+      id: id,
+      title: title,
+      posterPath: posterPath,
+      year: year,
+      runtime: runtime,
+      genres: genres,
+      rating: rating,
+      overview: overview,
+      backdropPath: backdropPath,
+      backendIndex: backendIndex ?? this.backendIndex,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -32,6 +49,7 @@ class Movie {
       'rating': rating,
       'overview': overview,
       'backdrop_path': backdropPath,
+      if (backendIndex != null) 'backend_index': backendIndex,  // NEW
     };
   }
 
@@ -39,7 +57,6 @@ class Movie {
     String releaseYear = 'Unknown';
     if (json['release_date'] != null &&
         json['release_date'].toString().isNotEmpty) {
-      // Parse the date string which comes in format "YYYY-MM-DD"
       releaseYear = json['release_date'].toString().substring(0, 4);
     }
 
@@ -60,6 +77,7 @@ class Movie {
       backdropPath: json['backdrop_path'] != null
           ? 'https://image.tmdb.org/t/p/w1280${json['backdrop_path']}'
           : '',
+      backendIndex: json['backend_index'] as int?,  // NEW
     );
   }
 
@@ -74,6 +92,7 @@ class Movie {
       rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
       overview: json['overview'] ?? 'No overview available',
       backdropPath: json['backdrop_path'] ?? '',
+      backendIndex: json['backend_index'] as int?,  // NEW
     );
   }
 }

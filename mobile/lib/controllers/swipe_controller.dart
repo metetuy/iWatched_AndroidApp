@@ -19,7 +19,6 @@ class SwipeController extends GetxController {
   final RxInt currentIndex = 0.obs;
 
   // Internal state
-  final Map<String, int> _movieBackendIndices = {};
   final List<Map<String, dynamic>> _swipeHistory = [];
   String _uid = '';
 
@@ -39,7 +38,6 @@ class SwipeController extends GetxController {
   Future<void> _initialize() async {
     _uid = await _fetchUser() ?? '';
 
-    // DEBUG: Check what we got
     debugPrint("═══════════════════════════════════════════");
     debugPrint("INIT DEBUG");
     debugPrint("   _uid after fetch: '$_uid'");
@@ -57,7 +55,6 @@ class SwipeController extends GetxController {
 
   Future<String?> _fetchUser() async {
     try {
-      // Check if user is logged in first
       final currentUser = FirebaseAuth.instance.currentUser;
 
       debugPrint("Checking Firebase Auth...");
@@ -92,8 +89,7 @@ class SwipeController extends GetxController {
     await _fetchBatchMovies(isInitial: true, count: 5);
   }
 
-  Future<void> _fetchBatchMovies(
-      {required bool isInitial, int count = 5}) async {
+  Future<void> _fetchBatchMovies({required bool isInitial, int count = 5}) async {
     if (_isLoadingBatch) return;
     _isLoadingBatch = true;
 
@@ -121,30 +117,21 @@ class SwipeController extends GetxController {
         return;
       }
 
-      // Parallel TMDB fetch
+      // Parallel TMDB fetch with backendIndex attached
       final futures = newBatch.map((item) {
+        final tmdbId = item.$1;
+        final backendIdx = item.$2;
         return _tmdbService
-            .getMovieById(item.$1)
+            .getMovieById(tmdbId)
             .timeout(const Duration(seconds: 3), onTimeout: () => null)
-            .then((movie) => MapEntry(item.$2, movie));
+            .then((movie) => movie?.copyWith(backendIndex: backendIdx));
       }).toList();
 
       final results = await Future.wait(futures);
-
-      final newMovies = <Movie>[];
-      final newIndices = <String, int>{};
-
-      for (final entry in results) {
-        final movie = entry.value;
-        if (movie != null) {
-          newMovies.add(movie);
-          newIndices[movie.id] = entry.key;
-        }
-      }
+      final newMovies = results.whereType<Movie>().toList();
 
       if (newMovies.isNotEmpty) {
         movies.addAll(newMovies);
-        _movieBackendIndices.addAll(newIndices);
       }
 
       debugPrint("Added ${newMovies.length} movies. Total: ${movies.length}");
@@ -164,8 +151,7 @@ class SwipeController extends GetxController {
     }
   }
 
-  bool handleSwipe(
-      int prevIndex, int? newIndex, CardSwiperDirection direction) {
+  bool handleSwipe(int prevIndex, int? newIndex, CardSwiperDirection direction) {
     if (prevIndex >= movies.length) return false;
 
     final swipedMovie = movies[prevIndex];
@@ -174,16 +160,13 @@ class SwipeController extends GetxController {
       currentIndex.value = newIndex;
     }
 
-    // Record history
     _swipeHistory.add({
       'movieIndex': prevIndex,
       'direction': direction,
     });
 
-    // Process in background
     _processSwipe(swipedMovie, direction);
 
-    // Check buffer after frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkAndFetchMoreIfNeeded(currentIndex.value);
     });
@@ -195,16 +178,18 @@ class SwipeController extends GetxController {
     Future.microtask(() async {
       final movieJson = movie.toJson();
       final movieId = movie.id;
-      final backendIndex = _movieBackendIndices[movieId];
+      final backendIndex = movie.backendIndex;
 
       String actionType = _getActionType(direction);
 
       // Update Firebase
       _updateFirebase(movie, movieJson, movieId, direction);
 
-      // Update backend
+      // Update backend (only if we have the index)
       if (backendIndex != null) {
         _backendService.sendSwipe(_uid, backendIndex, actionType);
+      } else {
+        debugPrint("⚠️ No backendIndex for '${movie.title}' - run migration first!");
       }
     });
   }
@@ -253,7 +238,7 @@ class SwipeController extends GetxController {
           break;
         case CardSwiperDirection.bottom:
           userRef.update({
-            'likedMovies' : FieldValue.arrayUnion([movieJson])
+            'likedMovies': FieldValue.arrayUnion([movieJson])
           });
           user.value!.likedMovies.add(movie);
           break;
@@ -263,8 +248,7 @@ class SwipeController extends GetxController {
     });
   }
 
-  bool handleUndo(
-      int? previousIndex, int currentIdx, CardSwiperDirection direction) {
+  bool handleUndo(int? previousIndex, int currentIdx, CardSwiperDirection direction) {
     if (_swipeHistory.isEmpty) {
       Get.snackbar('Undo Error', 'No more actions to undo');
       return false;
@@ -276,7 +260,6 @@ class SwipeController extends GetxController {
       final lastIndex = lastSwipe['movieIndex'] as int;
 
       currentIndex.value = lastIndex;
-
       _handleUndoFirebase(lastIndex, lastDirection);
 
       debugPrint('Undid action for movie: ${movies[lastIndex].title}');
@@ -328,6 +311,31 @@ class SwipeController extends GetxController {
     });
   }
 
+  Future<bool> handleAction(
+      Movie movie, int index, CardSwiperDirection direction) async {
+    try {
+      _processSwipe(movie, direction);
+
+      final updatedList = user.value!.watchLaterMovies
+          .where((m) => m.title != movie.title)
+          .map((m) => m.toJson())
+          .toList();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(FirebaseAuth.instance.currentUser!.uid)
+          .update({'watchLaterMovies': updatedList});
+
+      user.value!.watchLaterMovies.removeAt(index);
+      user.refresh();
+
+      return true;
+    } catch (e) {
+      debugPrint('Error removing movie: $e');
+      return true;
+    }
+  }
+
   Future<void> removeFromWatchLater(Movie movie, int index) async {
     try {
       final updatedList = user.value!.watchLaterMovies
@@ -341,7 +349,7 @@ class SwipeController extends GetxController {
           .update({'watchLaterMovies': updatedList});
 
       user.value!.watchLaterMovies.removeAt(index);
-      user.refresh(); // Trigger UI update
+      user.refresh();
     } catch (e) {
       debugPrint('Error removing movie: $e');
     }

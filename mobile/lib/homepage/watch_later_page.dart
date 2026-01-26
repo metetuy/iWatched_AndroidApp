@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:get/get.dart';
 import 'package:iwatched/controllers/swipe_controller.dart';
 import 'package:iwatched/utilities/movie_dialog_util.dart';
@@ -55,6 +56,12 @@ class WatchLaterPage extends StatelessWidget {
                 context: context,
                 movie: movie,
                 genreButtonBuilder: _buildGenreButtons,
+                onWatched: () => controller.handleAction(
+                    movie, index, CardSwiperDirection.right),
+                onSkip: () => controller.handleAction(
+                    movie, index, CardSwiperDirection.left),
+                onLike: () => controller.handleAction(
+                    movie, index, CardSwiperDirection.bottom),
               );
             },
             leading: ClipRRect(
@@ -83,10 +90,6 @@ class WatchLaterPage extends StatelessWidget {
             subtitle: Text(
               'Year: ${movie.year} • Rating: ${movie.rating.toStringAsFixed(1)}',
               style: const TextStyle(color: Colors.grey),
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: () => controller.removeFromWatchLater(movie, index),
             ),
           );
         },
