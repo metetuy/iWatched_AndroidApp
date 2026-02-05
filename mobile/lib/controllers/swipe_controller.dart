@@ -89,7 +89,8 @@ class SwipeController extends GetxController {
     await _fetchBatchMovies(isInitial: true, count: 5);
   }
 
-  Future<void> _fetchBatchMovies({required bool isInitial, int count = 5}) async {
+  Future<void> _fetchBatchMovies(
+      {required bool isInitial, int count = 5}) async {
     if (_isLoadingBatch) return;
     _isLoadingBatch = true;
 
@@ -151,7 +152,8 @@ class SwipeController extends GetxController {
     }
   }
 
-  bool handleSwipe(int prevIndex, int? newIndex, CardSwiperDirection direction) {
+  bool handleSwipe(
+      int prevIndex, int? newIndex, CardSwiperDirection direction) {
     if (prevIndex >= movies.length) return false;
 
     final swipedMovie = movies[prevIndex];
@@ -189,7 +191,8 @@ class SwipeController extends GetxController {
       if (backendIndex != null) {
         _backendService.sendSwipe(_uid, backendIndex, actionType);
       } else {
-        debugPrint("⚠️ No backendIndex for '${movie.title}' - run migration first!");
+        debugPrint(
+            "⚠️ No backendIndex for '${movie.title}' - run migration first!");
       }
     });
   }
@@ -248,7 +251,8 @@ class SwipeController extends GetxController {
     });
   }
 
-  bool handleUndo(int? previousIndex, int currentIdx, CardSwiperDirection direction) {
+  bool handleUndo(
+      int? previousIndex, int currentIdx, CardSwiperDirection direction) {
     if (_swipeHistory.isEmpty) {
       Get.snackbar('Undo Error', 'No more actions to undo');
       return false;
@@ -353,5 +357,60 @@ class SwipeController extends GetxController {
     } catch (e) {
       debugPrint('Error removing movie: $e');
     }
+  }
+
+  void sortWatchLater(String sortBy, bool ascending) {
+    if (user.value == null) return;
+
+    final movies = user.value!.watchLaterMovies;
+
+    switch (sortBy) {
+      case 'rating':
+        movies.sort((a, b) => ascending
+            ? a.rating.compareTo(b.rating)
+            : b.rating.compareTo(a.rating));
+        break;
+      case 'year':
+        movies.sort((a, b) =>
+            ascending ? a.year.compareTo(b.year) : b.year.compareTo(a.year));
+        break;
+      case 'title':
+        movies.sort((a, b) => ascending
+            ? a.title.compareTo(b.title)
+            : b.title.compareTo(a.title));
+        break;
+    }
+
+    user.refresh();
+  }
+
+  final Rx<String?> genreFilter = Rx<String?>(null);
+
+  List<String> getAvailableGenres() {
+    if (user.value == null) return [];
+    
+    final genres = <String>{};
+    for (final movie in user.value!.watchLaterMovies) {
+      genres.addAll(movie.genres);
+    }
+    return genres.toList()..sort();
+  }
+
+  List<Movie> get filteredWatchLaterMovies {
+    if (user.value == null) return [];
+    
+    var movies = user.value!.watchLaterMovies.toList();
+    
+    // Apply genre filter
+    if (genreFilter.value != null) {
+      movies = movies.where((m) => m.genres.contains(genreFilter.value)).toList();
+    }
+    
+    return movies;
+  }
+
+  void applyFilter(String sortBy, bool ascending, String? genre) {
+    genreFilter.value = genre;
+    sortWatchLater(sortBy, ascending);
   }
 }
